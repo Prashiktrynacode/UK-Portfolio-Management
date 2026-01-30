@@ -1,0 +1,484 @@
+// QuantVault Database Schema
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER & AUTHENTICATION
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  avatarUrl     String?
+  supabaseId    String    @unique @map("supabase_id")
+  
+  // Settings
+  settings      UserSettings?
+  
+  // Relationships
+  portfolios    Portfolio[]
+  brokerConnections BrokerConnection[]
+  importHistory ImportHistory[]
+  alerts        Alert[]
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model UserSettings {
+  id              String   @id @default(cuid())
+  userId          String   @unique @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Display preferences
+  currency        String   @default("USD")
+  dateFormat      String   @default("MM/DD/YYYY") @map("date_format")
+  theme           String   @default("dark")
+  
+  // Notification settings
+  emailAlerts     Boolean  @default(true) @map("email_alerts")
+  pushAlerts      Boolean  @default(false) @map("push_alerts")
+  weeklyDigest    Boolean  @default(true) @map("weekly_digest")
+  
+  // Risk preferences
+  riskTolerance   String   @default("moderate") @map("risk_tolerance") // conservative, moderate, aggressive
+  benchmarkIndex  String   @default("SPY") @map("benchmark_index")
+  
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("user_settings")
+}
+
+// ============================================
+// PORTFOLIO & POSITIONS
+// ============================================
+
+model Portfolio {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  name          String
+  description   String?
+  isDefault     Boolean   @default(false) @map("is_default")
+  accountType   AccountType @default(BROKERAGE) @map("account_type")
+  
+  // Calculated fields (cached for performance)
+  totalValue    Decimal?  @map("total_value") @db.Decimal(18, 2)
+  totalCost     Decimal?  @map("total_cost") @db.Decimal(18, 2)
+  dayChange     Decimal?  @map("day_change") @db.Decimal(18, 2)
+  dayChangePercent Decimal? @map("day_change_percent") @db.Decimal(8, 4)
+  
+  // Relationships
+  positions     Position[]
+  snapshots     PortfolioSnapshot[]
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("portfolios")
+}
+
+enum AccountType {
+  BROKERAGE
+  IRA
+  ROTH_IRA
+  K401
+  HSA
+  CRYPTO
+  OTHER
+}
+
+model Position {
+  id            String    @id @default(cuid())
+  portfolioId   String    @map("portfolio_id")
+  portfolio     Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  
+  // Asset identification
+  ticker        String
+  assetType     AssetType @default(STOCK) @map("asset_type")
+  name          String?
+  exchange      String?
+  
+  // Current position
+  quantity      Decimal   @db.Decimal(18, 8)
+  avgCostBasis  Decimal   @map("avg_cost_basis") @db.Decimal(18, 4)
+  
+  // Latest market data (cached)
+  currentPrice  Decimal?  @map("current_price") @db.Decimal(18, 4)
+  dayChange     Decimal?  @map("day_change") @db.Decimal(18, 4)
+  dayChangePercent Decimal? @map("day_change_percent") @db.Decimal(8, 4)
+  marketValue   Decimal?  @map("market_value") @db.Decimal(18, 2)
+  unrealizedPL  Decimal?  @map("unrealized_pl") @db.Decimal(18, 2)
+  unrealizedPLPercent Decimal? @map("unrealized_pl_percent") @db.Decimal(8, 4)
+  
+  // Sector/category classification
+  sector        String?
+  industry      String?
+  
+  // Tax lot tracking
+  lots          TaxLot[]
+  
+  // Price history for sparklines
+  priceHistory  PositionPriceHistory[]
+  
+  // Transactions
+  transactions  Transaction[]
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@unique([portfolioId, ticker])
+  @@index([portfolioId])
+  @@index([ticker])
+  @@map("positions")
+}
+
+enum AssetType {
+  STOCK
+  ETF
+  MUTUAL_FUND
+  BOND
+  CRYPTO
+  OPTION
+  REIT
+  COMMODITY
+  CASH
+  OTHER
+}
+
+// Tax lot for FIFO/LIFO tracking
+model TaxLot {
+  id            String    @id @default(cuid())
+  positionId    String    @map("position_id")
+  position      Position  @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  
+  quantity      Decimal   @db.Decimal(18, 8)
+  costBasis     Decimal   @map("cost_basis") @db.Decimal(18, 4)
+  purchaseDate  DateTime  @map("purchase_date")
+  
+  // For tracking sales
+  soldQuantity  Decimal   @default(0) @map("sold_quantity") @db.Decimal(18, 8)
+  
+  // Wash sale tracking
+  isWashSale    Boolean   @default(false) @map("is_wash_sale")
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([positionId])
+  @@map("tax_lots")
+}
+
+// Historical price data for sparklines
+model PositionPriceHistory {
+  id          String    @id @default(cuid())
+  positionId  String    @map("position_id")
+  position    Position  @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  
+  date        DateTime  @db.Date
+  open        Decimal   @db.Decimal(18, 4)
+  high        Decimal   @db.Decimal(18, 4)
+  low         Decimal   @db.Decimal(18, 4)
+  close       Decimal   @db.Decimal(18, 4)
+  volume      BigInt?
+
+  @@unique([positionId, date])
+  @@index([positionId, date])
+  @@map("position_price_history")
+}
+
+// ============================================
+// TRANSACTIONS
+// ============================================
+
+model Transaction {
+  id            String    @id @default(cuid())
+  positionId    String    @map("position_id")
+  position      Position  @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  
+  type          TransactionType
+  quantity      Decimal   @db.Decimal(18, 8)
+  price         Decimal   @db.Decimal(18, 4)
+  totalAmount   Decimal   @map("total_amount") @db.Decimal(18, 2)
+  fees          Decimal   @default(0) @db.Decimal(18, 2)
+  
+  executedAt    DateTime  @map("executed_at")
+  settledAt     DateTime? @map("settled_at")
+  
+  // For linking to broker imports
+  externalId    String?   @map("external_id")
+  source        String?   // 'manual', 'csv', 'broker_api'
+  
+  notes         String?
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([positionId])
+  @@index([executedAt])
+  @@map("transactions")
+}
+
+enum TransactionType {
+  BUY
+  SELL
+  DIVIDEND
+  DIVIDEND_REINVEST
+  SPLIT
+  TRANSFER_IN
+  TRANSFER_OUT
+  INTEREST
+  FEE
+}
+
+// ============================================
+// PORTFOLIO SNAPSHOTS (for historical tracking)
+// ============================================
+
+model PortfolioSnapshot {
+  id            String    @id @default(cuid())
+  portfolioId   String    @map("portfolio_id")
+  portfolio     Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  
+  date          DateTime  @db.Date
+  totalValue    Decimal   @map("total_value") @db.Decimal(18, 2)
+  totalCost     Decimal   @map("total_cost") @db.Decimal(18, 2)
+  cashBalance   Decimal   @map("cash_balance") @db.Decimal(18, 2)
+  
+  // Calculated metrics
+  dayReturn     Decimal?  @map("day_return") @db.Decimal(8, 4)
+  cumulativeReturn Decimal? @map("cumulative_return") @db.Decimal(8, 4)
+  
+  // Risk metrics
+  sharpeRatio   Decimal?  @map("sharpe_ratio") @db.Decimal(8, 4)
+  beta          Decimal?  @db.Decimal(8, 4)
+  alpha         Decimal?  @db.Decimal(8, 4)
+  standardDev   Decimal?  @map("standard_dev") @db.Decimal(8, 4)
+  maxDrawdown   Decimal?  @map("max_drawdown") @db.Decimal(8, 4)
+  
+  // Benchmark comparison
+  benchmarkValue Decimal? @map("benchmark_value") @db.Decimal(18, 2)
+  
+  // Allocation breakdown (JSON for flexibility)
+  sectorAllocation  Json?  @map("sector_allocation")
+  assetAllocation   Json?  @map("asset_allocation")
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@unique([portfolioId, date])
+  @@index([portfolioId, date])
+  @@map("portfolio_snapshots")
+}
+
+// ============================================
+// BROKER CONNECTIONS
+// ============================================
+
+model BrokerConnection {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  broker        BrokerType
+  status        ConnectionStatus @default(PENDING)
+  
+  // OAuth tokens (encrypted in production)
+  accessToken   String?   @map("access_token")
+  refreshToken  String?   @map("refresh_token")
+  tokenExpiry   DateTime? @map("token_expiry")
+  
+  // Sync metadata
+  lastSyncAt    DateTime? @map("last_sync_at")
+  lastSyncStatus String?  @map("last_sync_status")
+  syncError     String?   @map("sync_error")
+  accountIds    String[]  @map("account_ids") // Broker account IDs to sync
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@unique([userId, broker])
+  @@index([userId])
+  @@map("broker_connections")
+}
+
+enum BrokerType {
+  INTERACTIVE_BROKERS
+  ROBINHOOD
+  ALPACA
+  FIDELITY
+  CHARLES_SCHWAB
+  TD_AMERITRADE
+  ETRADE
+  COINBASE
+  KRAKEN
+  BINANCE
+}
+
+enum ConnectionStatus {
+  PENDING
+  CONNECTED
+  SYNCING
+  ERROR
+  DISCONNECTED
+}
+
+// ============================================
+// DATA IMPORT HISTORY
+// ============================================
+
+model ImportHistory {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  source        String    // 'csv', 'broker_sync', 'manual'
+  sourceName    String?   @map("source_name") // filename or broker name
+  
+  status        ImportStatus @default(PENDING)
+  recordsTotal  Int       @default(0) @map("records_total")
+  recordsSuccess Int      @default(0) @map("records_success")
+  recordsFailed Int       @default(0) @map("records_failed")
+  
+  // Error details
+  errors        Json?     // Array of error messages
+  
+  // Column mapping used (for CSV)
+  columnMapping Json?     @map("column_mapping")
+  
+  startedAt     DateTime  @default(now()) @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("import_history")
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  COMPLETED_WITH_WARNINGS
+  FAILED
+}
+
+// ============================================
+// ALERTS & NOTIFICATIONS
+// ============================================
+
+model Alert {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type          AlertType
+  severity      AlertSeverity @default(INFO)
+  title         String
+  message       String
+  
+  // Optional link to related entity
+  portfolioId   String?   @map("portfolio_id")
+  positionId    String?   @map("position_id")
+  ticker        String?
+  
+  isRead        Boolean   @default(false) @map("is_read")
+  isDismissed   Boolean   @default(false) @map("is_dismissed")
+  
+  expiresAt     DateTime? @map("expires_at")
+  
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, isRead])
+  @@map("alerts")
+}
+
+enum AlertType {
+  PRICE_TARGET
+  STOP_LOSS
+  PORTFOLIO_IMBALANCE
+  DIVIDEND
+  EARNINGS
+  SYNC_ERROR
+  SYSTEM
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  ERROR
+  SUCCESS
+}
+
+// ============================================
+// MARKET DATA CACHE
+// ============================================
+
+model MarketDataCache {
+  id            String    @id @default(cuid())
+  ticker        String    @unique
+  
+  // Current quote
+  price         Decimal   @db.Decimal(18, 4)
+  change        Decimal   @db.Decimal(18, 4)
+  changePercent Decimal   @map("change_percent") @db.Decimal(8, 4)
+  volume        BigInt?
+  
+  // Day range
+  dayHigh       Decimal?  @map("day_high") @db.Decimal(18, 4)
+  dayLow        Decimal?  @map("day_low") @db.Decimal(18, 4)
+  
+  // 52-week range
+  weekHigh52    Decimal?  @map("week_high_52") @db.Decimal(18, 4)
+  weekLow52     Decimal?  @map("week_low_52") @db.Decimal(18, 4)
+  
+  // Fundamentals
+  marketCap     BigInt?   @map("market_cap")
+  peRatio       Decimal?  @map("pe_ratio") @db.Decimal(8, 2)
+  dividendYield Decimal?  @map("dividend_yield") @db.Decimal(8, 4)
+  
+  // Metadata
+  name          String?
+  sector        String?
+  industry      String?
+  exchange      String?
+  
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([ticker])
+  @@map("market_data_cache")
+}
+
+// ============================================
+// BENCHMARK DATA
+// ============================================
+
+model BenchmarkData {
+  id            String    @id @default(cuid())
+  ticker        String    // e.g., 'SPY', 'QQQ', 'VTI'
+  date          DateTime  @db.Date
+  
+  open          Decimal   @db.Decimal(18, 4)
+  high          Decimal   @db.Decimal(18, 4)
+  low           Decimal   @db.Decimal(18, 4)
+  close         Decimal   @db.Decimal(18, 4)
+  adjustedClose Decimal   @map("adjusted_close") @db.Decimal(18, 4)
+  volume        BigInt?
+
+  @@unique([ticker, date])
+  @@index([ticker, date])
+  @@map("benchmark_data")
+}

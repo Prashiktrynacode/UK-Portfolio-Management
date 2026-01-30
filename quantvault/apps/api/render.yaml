@@ -1,0 +1,55 @@
+# Render.yaml - Backend API Deployment Configuration
+# Place this file in the root of your repository
+
+services:
+  - type: web
+    name: quantvault-api
+    runtime: node
+    region: oregon # or your preferred region
+    plan: free # Use 'starter' for production to avoid cold starts
+    
+    # Build configuration
+    buildCommand: |
+      cd apps/api
+      npm install
+      npx prisma generate
+      npm run build
+    
+    # Start command
+    startCommand: |
+      cd apps/api
+      npx prisma migrate deploy
+      npm start
+    
+    # Health check
+    healthCheckPath: /health
+    
+    # Environment variables
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: DATABASE_URL
+        sync: false # Set manually in Render dashboard
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false # Set to your Vercel URL
+      - key: API_SECRET
+        generateValue: true # Auto-generate secure value
+    
+    # Auto-deploy on push
+    autoDeploy: true
+    
+    # Branch to deploy from
+    branch: main
+
+# Optional: Database (if not using Supabase/Neon)
+# databases:
+#   - name: quantvault-db
+#     plan: free
+#     databaseName: quantvault
+#     user: quantvault_user
