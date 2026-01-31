@@ -42,9 +42,9 @@ export default function AnalysisPage() {
   // Current positions with any simulated changes applied
   const displayPositions = useMemo(() => {
     if (!positions) return [];
-    
-    const positionMap = new Map(positions.map(p => [p.ticker, { ...p, simChange: null }]));
-    
+
+    const positionMap = new Map(positions.map(p => [p.ticker, { ...p, simChange: null as number | null }]));
+
     // Apply changes
     changes.forEach(change => {
       if (positionMap.has(change.ticker)) {
