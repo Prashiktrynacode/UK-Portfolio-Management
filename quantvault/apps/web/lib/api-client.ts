@@ -2,6 +2,7 @@
 // apps/web/lib/api-client.ts
 
 import { QueryClient } from '@tanstack/react-query';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
 
@@ -28,10 +29,13 @@ interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
 }
 
-// Get auth token from storage
-function getAuthToken(): string | null {
+// Get auth token from Supabase session
+async function getAuthToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('auth_token');
+
+  const supabase = createClientComponentClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token || null;
 }
 
 // Base fetch wrapper with auth and error handling
@@ -40,7 +44,7 @@ async function apiFetch<T>(
   options: RequestOptions = {}
 ): Promise<T> {
   const { params, ...fetchOptions } = options;
-  
+
   // Build URL with query params
   let url = `${API_BASE_URL}${endpoint}`;
   if (params) {
@@ -57,12 +61,12 @@ async function apiFetch<T>(
   }
 
   // Add auth header
-  const token = getAuthToken();
+  const token = await getAuthToken();
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...fetchOptions.headers,
   };
-  
+
   if (token) {
     (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
   }
@@ -197,19 +201,19 @@ export const api = {
     parseCSV: async (file: File) => {
       const formData = new FormData();
       formData.append('file', file);
-      
-      const token = getAuthToken();
+
+      const token = await getAuthToken();
       const response = await fetch(`${API_BASE_URL}/import/parse-csv`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
-      
+
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.message);
       }
-      
+
       return response.json() as Promise<CSVParseResult>;
     },
     
