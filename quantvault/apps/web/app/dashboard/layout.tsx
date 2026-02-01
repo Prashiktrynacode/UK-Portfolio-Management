@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, createContext, useContext } from 'react';
+import { useState, createContext, useContext, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
@@ -15,18 +15,35 @@ import {
   X,
   TrendingUp,
   Plus,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { api, Portfolio } from '@/lib/api-client';
 
-// Context to share modal state with child pages
-const CreatePortfolioContext = createContext<{
+// Context to share portfolio state with child pages
+const PortfolioContext = createContext<{
+  portfolios: Portfolio[];
+  selectedPortfolio: Portfolio | null;
+  setSelectedPortfolio: (p: Portfolio) => void;
+  refreshPortfolios: () => void;
   openCreateModal: () => void;
+  isLoading: boolean;
 }>({
+  portfolios: [],
+  selectedPortfolio: null,
+  setSelectedPortfolio: () => {},
+  refreshPortfolios: () => {},
   openCreateModal: () => {},
+  isLoading: true,
 });
 
-export const useCreatePortfolioModal = () => useContext(CreatePortfolioContext);
+export const usePortfolio = () => useContext(PortfolioContext);
+export const useCreatePortfolioModal = () => {
+  const { openCreateModal } = useContext(PortfolioContext);
+  return { openCreateModal };
+};
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -46,6 +63,31 @@ export default function DashboardLayout({
   const supabase = createClientComponentClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [selectedPortfolio, setSelectedPortfolio] = useState<Portfolio | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showPortfolioDropdown, setShowPortfolioDropdown] = useState(false);
+
+  const fetchPortfolios = async () => {
+    try {
+      const data = await api.portfolios.list();
+      setPortfolios(data);
+      // Select default or first portfolio
+      if (data.length > 0) {
+        const defaultPortfolio = data.find(p => p.isDefault) || data[0];
+        setSelectedPortfolio(defaultPortfolio);
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch portfolios:', error);
+      // Don't show error toast on initial load if not authenticated
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPortfolios();
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -56,8 +98,21 @@ export default function DashboardLayout({
 
   const openCreateModal = () => setShowCreateModal(true);
 
+  const handlePortfolioCreated = (newPortfolio: Portfolio) => {
+    setPortfolios(prev => [...prev, newPortfolio]);
+    setSelectedPortfolio(newPortfolio);
+    setShowCreateModal(false);
+  };
+
   return (
-    <CreatePortfolioContext.Provider value={{ openCreateModal }}>
+    <PortfolioContext.Provider value={{
+      portfolios,
+      selectedPortfolio,
+      setSelectedPortfolio,
+      refreshPortfolios: fetchPortfolios,
+      openCreateModal,
+      isLoading,
+    }}>
       <div className="min-h-screen bg-background">
         {/* Mobile sidebar backdrop */}
         {sidebarOpen && (
@@ -86,6 +141,49 @@ export default function DashboardLayout({
                 <X className="size-5" />
               </button>
             </div>
+
+            {/* Portfolio Selector */}
+            {portfolios.length > 0 && (
+              <div className="p-4 border-b border-border">
+                <div className="relative">
+                  <button
+                    onClick={() => setShowPortfolioDropdown(!showPortfolioDropdown)}
+                    className="w-full flex items-center justify-between px-3 py-2 bg-secondary/50 rounded-lg text-sm hover:bg-secondary transition-colors"
+                  >
+                    <span className="truncate font-medium">
+                      {selectedPortfolio?.name || 'Select Portfolio'}
+                    </span>
+                    <ChevronDown className={cn(
+                      "size-4 transition-transform",
+                      showPortfolioDropdown && "rotate-180"
+                    )} />
+                  </button>
+
+                  {showPortfolioDropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
+                      {portfolios.map((portfolio) => (
+                        <button
+                          key={portfolio.id}
+                          onClick={() => {
+                            setSelectedPortfolio(portfolio);
+                            setShowPortfolioDropdown(false);
+                          }}
+                          className={cn(
+                            "w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary/50 transition-colors",
+                            selectedPortfolio?.id === portfolio.id && "bg-primary/10 text-primary"
+                          )}
+                        >
+                          <span className="truncate">{portfolio.name}</span>
+                          {selectedPortfolio?.id === portfolio.id && (
+                            <Check className="size-4" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Create Portfolio Button */}
             <div className="p-4">
@@ -165,15 +263,25 @@ export default function DashboardLayout({
 
         {/* Create Portfolio Modal */}
         {showCreateModal && (
-          <CreatePortfolioModal onClose={() => setShowCreateModal(false)} />
+          <CreatePortfolioModal
+            onClose={() => setShowCreateModal(false)}
+            onCreated={handlePortfolioCreated}
+          />
         )}
       </div>
-    </CreatePortfolioContext.Provider>
+    </PortfolioContext.Provider>
   );
 }
 
-function CreatePortfolioModal({ onClose }: { onClose: () => void }) {
+function CreatePortfolioModal({
+  onClose,
+  onCreated
+}: {
+  onClose: () => void;
+  onCreated: (portfolio: Portfolio) => void;
+}) {
   const [name, setName] = useState('');
+  const [accountType, setAccountType] = useState('BROKERAGE');
   const [creating, setCreating] = useState(false);
 
   const handleCreate = async () => {
@@ -184,10 +292,14 @@ function CreatePortfolioModal({ onClose }: { onClose: () => void }) {
 
     setCreating(true);
     try {
-      // For now, just show success - API integration will be added
-      toast.success('Portfolio created! (Demo mode)');
-      onClose();
+      const newPortfolio = await api.portfolios.create({
+        name: name.trim(),
+        accountType,
+      });
+      toast.success('Portfolio created successfully!');
+      onCreated(newPortfolio);
     } catch (error: any) {
+      console.error('Create portfolio error:', error);
       toast.error(error.message || 'Failed to create portfolio');
     } finally {
       setCreating(false);
@@ -213,6 +325,22 @@ function CreatePortfolioModal({ onClose }: { onClose: () => void }) {
                 if (e.key === 'Escape') onClose();
               }}
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Account Type</label>
+            <select
+              value={accountType}
+              onChange={(e) => setAccountType(e.target.value)}
+              className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+            >
+              <option value="BROKERAGE">Brokerage</option>
+              <option value="IRA">IRA</option>
+              <option value="ROTH_IRA">Roth IRA</option>
+              <option value="K401">401(k)</option>
+              <option value="HSA">HSA</option>
+              <option value="CRYPTO">Crypto</option>
+              <option value="OTHER">Other</option>
+            </select>
           </div>
           <div className="flex gap-3">
             <button
