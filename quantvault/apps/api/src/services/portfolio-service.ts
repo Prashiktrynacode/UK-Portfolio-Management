@@ -3,14 +3,15 @@
 
 interface Position {
   ticker: string;
-  name?: string;
+  name?: string | null;
   quantity: any;
   avgCostBasis: any;
   currentPrice: any;
   marketValue: any;
   unrealizedPL: any;
   unrealizedPLPercent: any;
-  sector?: string;
+  dayChangePercent?: any;
+  sector?: string | null;
   assetType: string;
   lots?: any[];
   transactions?: any[];
