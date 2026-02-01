@@ -3,24 +3,45 @@
 
 import { prisma } from '../server';
 
-interface YahooQuote {
-  symbol: string;
-  regularMarketPrice: number;
-  regularMarketChange: number;
-  regularMarketChangePercent: number;
-  regularMarketDayHigh: number;
-  regularMarketDayLow: number;
-  regularMarketVolume: number;
-  fiftyTwoWeekHigh: number;
-  fiftyTwoWeekLow: number;
-  marketCap: number;
-  trailingPE: number;
-  dividendYield: number;
-  shortName: string;
-  longName: string;
-  sector: string;
-  industry: string;
-  exchange: string;
+// Yahoo Finance API response types
+interface YahooChartResponse {
+  chart: {
+    result: Array<{
+      meta: {
+        symbol: string;
+        regularMarketPrice?: number;
+        previousClose?: number;
+        chartPreviousClose?: number;
+        regularMarketDayHigh?: number;
+        regularMarketDayLow?: number;
+        regularMarketVolume?: number;
+        fiftyTwoWeekHigh?: number;
+        fiftyTwoWeekLow?: number;
+        shortName?: string;
+        longName?: string;
+        exchangeName?: string;
+        exchange?: string;
+      };
+      timestamp?: number[];
+      indicators?: {
+        quote?: Array<{
+          high?: number[];
+          low?: number[];
+          close?: number[];
+        }>;
+      };
+    }>;
+  };
+}
+
+interface YahooSearchResponse {
+  quotes: Array<{
+    symbol: string;
+    shortname?: string;
+    longname?: string;
+    exchange?: string;
+    quoteType?: string;
+  }>;
 }
 
 interface QuoteResult {
@@ -65,7 +86,7 @@ async function fetchYahooQuote(ticker: string): Promise<QuoteResult | null> {
       return null;
     }
 
-    const data = await response.json();
+    const data = await response.json() as YahooChartResponse;
     const result = data.chart?.result?.[0];
 
     if (!result) {
@@ -347,7 +368,7 @@ export async function getHistoricalData(
       return [];
     }
 
-    const data = await response.json();
+    const data = await response.json() as YahooChartResponse;
     const result = data.chart?.result?.[0];
 
     if (!result) {
@@ -360,7 +381,7 @@ export async function getHistoricalData(
     return timestamps.map((ts: number, i: number) => ({
       date: new Date(ts * 1000).toISOString().split('T')[0],
       close: closes[i] || 0,
-    })).filter((d: any) => d.close > 0);
+    })).filter((d: { date: string; close: number }) => d.close > 0);
   } catch (error) {
     console.error(`Error fetching historical data for ${ticker}:`, error);
     return [];
@@ -389,10 +410,10 @@ export async function searchTickers(query: string): Promise<{
       return [];
     }
 
-    const data = await response.json();
+    const data = await response.json() as YahooSearchResponse;
     const quotes = data.quotes || [];
 
-    return quotes.map((q: any) => ({
+    return quotes.map((q) => ({
       symbol: q.symbol,
       name: q.shortname || q.longname || q.symbol,
       exchange: q.exchange || '',
