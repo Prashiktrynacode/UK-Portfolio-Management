@@ -4,6 +4,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../server';
 import { Decimal } from '@prisma/client/runtime/library';
+import { getQuote, updatePositionMarketData } from '../services/market-data-service';
 
 interface PositionParams {
   id: string;
@@ -203,7 +204,18 @@ export async function positionsRoutes(fastify: FastifyInstance) {
         },
       });
 
-      return reply.status(201).send(position);
+      // Fetch and update market data for the new position
+      try {
+        await updatePositionMarketData(position.id);
+        const updatedPosition = await prisma.position.findUnique({
+          where: { id: position.id },
+          include: { lots: true },
+        });
+        return reply.status(201).send(updatedPosition);
+      } catch (err) {
+        // If market data fails, still return the position
+        return reply.status(201).send(position);
+      }
     }
   );
 

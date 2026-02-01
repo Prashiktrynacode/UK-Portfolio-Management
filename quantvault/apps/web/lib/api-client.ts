@@ -233,6 +233,29 @@ export const api = {
     
     getTemplates: () => apiFetch<{ templates: CSVTemplate[] }>('/import/templates'),
   },
+
+  // Market data endpoints
+  market: {
+    getQuote: (ticker: string) => apiFetch<MarketQuote>(`/market/quote/${ticker}`),
+
+    getQuotes: (tickers: string[]) =>
+      apiFetch<Record<string, MarketQuote>>('/market/quotes', {
+        method: 'POST',
+        body: JSON.stringify({ tickers }),
+      }),
+
+    getHistory: (ticker: string, range = '1Y') =>
+      apiFetch<{ ticker: string; range: string; data: { date: string; close: number }[] }>(
+        `/market/history/${ticker}`,
+        { params: { range } }
+      ),
+
+    search: (query: string) =>
+      apiFetch<{ results: TickerSearchResult[] }>('/market/search', { params: { q: query } }),
+
+    refreshPortfolio: (portfolioId: string) =>
+      apiFetch<{ success: boolean }>(`/market/refresh/${portfolioId}`, { method: 'POST' }),
+  },
 };
 
 // ============================================
@@ -605,4 +628,30 @@ export interface CreateTransactionInput {
   fees?: number;
   executedAt?: string;
   notes?: string;
+}
+
+export interface MarketQuote {
+  ticker: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  dayHigh: number | null;
+  dayLow: number | null;
+  volume: number | null;
+  weekHigh52: number | null;
+  weekLow52: number | null;
+  marketCap: number | null;
+  peRatio: number | null;
+  dividendYield: number | null;
+  name: string | null;
+  sector: string | null;
+  industry: string | null;
+  exchange: string | null;
+}
+
+export interface TickerSearchResult {
+  symbol: string;
+  name: string;
+  exchange: string;
+  type: string;
 }

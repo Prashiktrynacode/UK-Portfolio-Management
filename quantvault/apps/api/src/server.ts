@@ -11,6 +11,7 @@ import { positionsRoutes } from './routes/positions';
 import { transactionsRoutes } from './routes/transactions';
 import { analysisRoutes } from './routes/analysis';
 import { importRoutes } from './routes/import';
+import { marketRoutes } from './routes/market';
 import { authMiddleware } from './middleware/auth';
 
 // Initialize Prisma
@@ -77,6 +78,7 @@ server.register(async (app) => {
   app.register(transactionsRoutes, { prefix: '/transactions' });
   app.register(analysisRoutes, { prefix: '/analysis' });
   app.register(importRoutes, { prefix: '/import' });
+  app.register(marketRoutes, { prefix: '/market' });
 }, { prefix: '/api/v1' });
 
 // Global error handler
