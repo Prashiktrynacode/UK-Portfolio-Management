@@ -1,49 +1,28 @@
-'use client';
-
 import './globals.css';
+import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toaster } from 'sonner';
-import { useState } from 'react';
+import { Providers } from './providers';
 
 const inter = Inter({ subsets: ['latin'] });
+
+export const metadata: Metadata = {
+  title: 'QuantVault - Portfolio Management',
+  description: 'Professional portfolio tracking and analysis',
+};
 
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 60 * 1000,
-            refetchOnWindowFocus: false,
-          },
-        },
-      })
-  );
-
   return (
     <html lang="en" className="dark">
-      <head>
-        <title>QuantVault - Portfolio Management</title>
-        <meta name="description" content="Professional portfolio tracking and analysis" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </head>
       <body className={inter.className}>
-        <QueryClientProvider client={queryClient}>
+        <Providers>
           <div className="min-h-screen bg-background">
             {children}
           </div>
-          <Toaster
-            position="bottom-right"
-            theme="dark"
-            richColors
-            closeButton
-          />
-        </QueryClientProvider>
+        </Providers>
       </body>
     </html>
   );
