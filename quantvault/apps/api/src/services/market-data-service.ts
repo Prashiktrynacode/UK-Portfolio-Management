@@ -138,78 +138,87 @@ export async function getQuote(ticker: string): Promise<QuoteResult | null> {
     return cached.data;
   }
 
-  // Check database cache
-  const dbCache = await prisma.marketDataCache.findUnique({
-    where: { ticker: normalizedTicker },
-  });
+  // Try to check database cache (but handle if table doesn't exist)
+  try {
+    const dbCache = await prisma.marketDataCache.findUnique({
+      where: { ticker: normalizedTicker },
+    });
 
-  if (dbCache && Date.now() - dbCache.updatedAt.getTime() < CACHE_DURATION) {
-    const result: QuoteResult = {
-      ticker: dbCache.ticker,
-      price: Number(dbCache.price),
-      change: Number(dbCache.change),
-      changePercent: Number(dbCache.changePercent),
-      dayHigh: dbCache.dayHigh ? Number(dbCache.dayHigh) : null,
-      dayLow: dbCache.dayLow ? Number(dbCache.dayLow) : null,
-      volume: dbCache.volume ? Number(dbCache.volume) : null,
-      weekHigh52: dbCache.weekHigh52 ? Number(dbCache.weekHigh52) : null,
-      weekLow52: dbCache.weekLow52 ? Number(dbCache.weekLow52) : null,
-      marketCap: dbCache.marketCap ? Number(dbCache.marketCap) : null,
-      peRatio: dbCache.peRatio ? Number(dbCache.peRatio) : null,
-      dividendYield: dbCache.dividendYield ? Number(dbCache.dividendYield) : null,
-      name: dbCache.name,
-      sector: dbCache.sector,
-      industry: dbCache.industry,
-      exchange: dbCache.exchange,
-    };
+    if (dbCache && Date.now() - dbCache.updatedAt.getTime() < CACHE_DURATION) {
+      const result: QuoteResult = {
+        ticker: dbCache.ticker,
+        price: Number(dbCache.price),
+        change: Number(dbCache.change),
+        changePercent: Number(dbCache.changePercent),
+        dayHigh: dbCache.dayHigh ? Number(dbCache.dayHigh) : null,
+        dayLow: dbCache.dayLow ? Number(dbCache.dayLow) : null,
+        volume: dbCache.volume ? Number(dbCache.volume) : null,
+        weekHigh52: dbCache.weekHigh52 ? Number(dbCache.weekHigh52) : null,
+        weekLow52: dbCache.weekLow52 ? Number(dbCache.weekLow52) : null,
+        marketCap: dbCache.marketCap ? Number(dbCache.marketCap) : null,
+        peRatio: dbCache.peRatio ? Number(dbCache.peRatio) : null,
+        dividendYield: dbCache.dividendYield ? Number(dbCache.dividendYield) : null,
+        name: dbCache.name,
+        sector: dbCache.sector,
+        industry: dbCache.industry,
+        exchange: dbCache.exchange,
+      };
 
-    quoteCache.set(normalizedTicker, { data: result, timestamp: Date.now() });
-    return result;
+      quoteCache.set(normalizedTicker, { data: result, timestamp: Date.now() });
+      return result;
+    }
+  } catch (err) {
+    // Database cache table might not exist, continue without it
+    console.log('MarketDataCache table not available, using memory cache only');
   }
 
   // Fetch fresh data
   const quote = await fetchYahooQuote(normalizedTicker);
 
   if (quote) {
-    // Update database cache
-    await prisma.marketDataCache.upsert({
-      where: { ticker: normalizedTicker },
-      update: {
-        price: quote.price,
-        change: quote.change,
-        changePercent: quote.changePercent,
-        dayHigh: quote.dayHigh,
-        dayLow: quote.dayLow,
-        volume: quote.volume,
-        weekHigh52: quote.weekHigh52,
-        weekLow52: quote.weekLow52,
-        marketCap: quote.marketCap,
-        peRatio: quote.peRatio,
-        dividendYield: quote.dividendYield,
-        name: quote.name,
-        sector: quote.sector,
-        industry: quote.industry,
-        exchange: quote.exchange,
-      },
-      create: {
-        ticker: normalizedTicker,
-        price: quote.price,
-        change: quote.change,
-        changePercent: quote.changePercent,
-        dayHigh: quote.dayHigh,
-        dayLow: quote.dayLow,
-        volume: quote.volume,
-        weekHigh52: quote.weekHigh52,
-        weekLow52: quote.weekLow52,
-        marketCap: quote.marketCap,
-        peRatio: quote.peRatio,
-        dividendYield: quote.dividendYield,
-        name: quote.name,
-        sector: quote.sector,
-        industry: quote.industry,
-        exchange: quote.exchange,
-      },
-    });
+    // Try to update database cache (but don't fail if table doesn't exist)
+    try {
+      await prisma.marketDataCache.upsert({
+        where: { ticker: normalizedTicker },
+        update: {
+          price: quote.price,
+          change: quote.change,
+          changePercent: quote.changePercent,
+          dayHigh: quote.dayHigh,
+          dayLow: quote.dayLow,
+          volume: quote.volume,
+          weekHigh52: quote.weekHigh52,
+          weekLow52: quote.weekLow52,
+          marketCap: quote.marketCap,
+          peRatio: quote.peRatio,
+          dividendYield: quote.dividendYield,
+          name: quote.name,
+          sector: quote.sector,
+          industry: quote.industry,
+          exchange: quote.exchange,
+        },
+        create: {
+          ticker: normalizedTicker,
+          price: quote.price,
+          change: quote.change,
+          changePercent: quote.changePercent,
+          dayHigh: quote.dayHigh,
+          dayLow: quote.dayLow,
+          volume: quote.volume,
+          weekHigh52: quote.weekHigh52,
+          weekLow52: quote.weekLow52,
+          marketCap: quote.marketCap,
+          peRatio: quote.peRatio,
+          dividendYield: quote.dividendYield,
+          name: quote.name,
+          sector: quote.sector,
+          industry: quote.industry,
+          exchange: quote.exchange,
+        },
+      });
+    } catch (err) {
+      // Database cache table might not exist, just use memory cache
+    }
 
     quoteCache.set(normalizedTicker, { data: quote, timestamp: Date.now() });
   }

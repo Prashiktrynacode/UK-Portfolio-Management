@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, FileSpreadsheet, Plus, Loader2, X, Check, AlertCircle } from 'lucide-react';
+import { Upload, FileSpreadsheet, Plus, Loader2, X, Check, AlertCircle, Link2, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePortfolio } from '../layout';
 import { api } from '@/lib/api-client';
@@ -215,6 +215,100 @@ export default function ImportPage() {
         <h3 className="font-semibold mb-4">Quick Add Single Position</h3>
         <QuickAddForm portfolioId={selectedPortfolio.id} />
       </div>
+
+      {/* Broker Connections */}
+      <div className="p-6 bg-card border border-border rounded-xl">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="size-12 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Link2 className="size-6 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-semibold">Connect Broker</h3>
+            <p className="text-sm text-muted-foreground">Auto-sync with your brokerage account</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <BrokerCard
+            name="Interactive Brokers"
+            logo="IBKR"
+            description="Connect your IBKR account for automatic portfolio sync"
+            status="coming_soon"
+          />
+          <BrokerCard
+            name="Trading 212"
+            logo="T212"
+            description="Sync your Trading 212 ISA or Invest account"
+            status="coming_soon"
+          />
+          <BrokerCard
+            name="Alpaca"
+            logo="ALP"
+            description="Connect Alpaca for commission-free trading sync"
+            status="coming_soon"
+          />
+          <BrokerCard
+            name="Robinhood"
+            logo="RH"
+            description="Import your Robinhood portfolio"
+            status="coming_soon"
+          />
+          <BrokerCard
+            name="Charles Schwab"
+            logo="SCH"
+            description="Sync your Schwab brokerage account"
+            status="coming_soon"
+          />
+          <BrokerCard
+            name="Coinbase"
+            logo="CB"
+            description="Track your crypto holdings from Coinbase"
+            status="coming_soon"
+          />
+        </div>
+
+        <p className="text-sm text-muted-foreground mt-6 text-center">
+          Broker integrations are coming soon. In the meantime, you can import your holdings via CSV export from your broker.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function BrokerCard({
+  name,
+  logo,
+  description,
+  status
+}: {
+  name: string;
+  logo: string;
+  description: string;
+  status: 'connected' | 'available' | 'coming_soon';
+}) {
+  return (
+    <div className={cn(
+      "p-4 border rounded-xl transition-colors",
+      status === 'coming_soon' ? "border-border opacity-60" : "border-border hover:border-primary/50 cursor-pointer"
+    )}>
+      <div className="flex items-center gap-3 mb-2">
+        <div className="size-10 rounded-lg bg-secondary flex items-center justify-center text-xs font-bold">
+          {logo}
+        </div>
+        <div className="flex-1">
+          <h4 className="font-medium text-sm">{name}</h4>
+          {status === 'coming_soon' && (
+            <span className="text-xs text-muted-foreground">Coming Soon</span>
+          )}
+          {status === 'connected' && (
+            <span className="text-xs text-green-500">Connected</span>
+          )}
+        </div>
+        {status !== 'coming_soon' && (
+          <ExternalLink className="size-4 text-muted-foreground" />
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">{description}</p>
     </div>
   );
 }
