@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, FileSpreadsheet, Plus, Loader2, X, Check, AlertCircle, Link2, ExternalLink } from 'lucide-react';
+import { Upload, FileSpreadsheet, Plus, Loader2, X, Check, AlertCircle, Link2, ExternalLink, Key, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePortfolio } from '../layout';
-import { api } from '@/lib/api-client';
+import { api, BrokerConnection } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
 export default function ImportPage() {
@@ -217,98 +217,381 @@ export default function ImportPage() {
       </div>
 
       {/* Broker Connections */}
-      <div className="p-6 bg-card border border-border rounded-xl">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="size-12 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Link2 className="size-6 text-primary" />
-          </div>
-          <div>
-            <h3 className="font-semibold">Connect Broker</h3>
-            <p className="text-sm text-muted-foreground">Auto-sync with your brokerage account</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <BrokerCard
-            name="Interactive Brokers"
-            logo="IBKR"
-            description="Connect your IBKR account for automatic portfolio sync"
-            status="coming_soon"
-          />
-          <BrokerCard
-            name="Trading 212"
-            logo="T212"
-            description="Sync your Trading 212 ISA or Invest account"
-            status="coming_soon"
-          />
-          <BrokerCard
-            name="Alpaca"
-            logo="ALP"
-            description="Connect Alpaca for commission-free trading sync"
-            status="coming_soon"
-          />
-          <BrokerCard
-            name="Robinhood"
-            logo="RH"
-            description="Import your Robinhood portfolio"
-            status="coming_soon"
-          />
-          <BrokerCard
-            name="Charles Schwab"
-            logo="SCH"
-            description="Sync your Schwab brokerage account"
-            status="coming_soon"
-          />
-          <BrokerCard
-            name="Coinbase"
-            logo="CB"
-            description="Track your crypto holdings from Coinbase"
-            status="coming_soon"
-          />
-        </div>
-
-        <p className="text-sm text-muted-foreground mt-6 text-center">
-          Broker integrations are coming soon. In the meantime, you can import your holdings via CSV export from your broker.
-        </p>
-      </div>
+      <BrokerConnectionsSection portfolioId={selectedPortfolio.id} />
     </div>
   );
 }
 
+const BROKERS = [
+  {
+    id: 'TRADING_212',
+    name: 'Trading 212',
+    logo: 'T212',
+    description: 'Sync your Trading 212 ISA or Invest account',
+    requiresSecret: false,
+    apiKeyLabel: 'API Key',
+    helpUrl: 'https://helpcentre.trading212.com/hc/en-us/articles/13770391070365-How-do-I-generate-an-API-key',
+  },
+  {
+    id: 'ALPACA',
+    name: 'Alpaca',
+    logo: 'ALP',
+    description: 'Connect Alpaca for commission-free trading sync',
+    requiresSecret: true,
+    apiKeyLabel: 'API Key ID',
+    apiSecretLabel: 'API Secret Key',
+    helpUrl: 'https://alpaca.markets/docs/trading/getting_started/',
+  },
+  {
+    id: 'INTERACTIVE_BROKERS',
+    name: 'Interactive Brokers',
+    logo: 'IBKR',
+    description: 'Connect your IBKR account for automatic portfolio sync',
+    requiresSecret: false,
+    apiKeyLabel: 'API Token',
+    helpUrl: 'https://www.interactivebrokers.com/en/trading/ib-api.php',
+    comingSoon: true,
+  },
+  {
+    id: 'COINBASE',
+    name: 'Coinbase',
+    logo: 'CB',
+    description: 'Track your crypto holdings from Coinbase',
+    requiresSecret: true,
+    apiKeyLabel: 'API Key',
+    apiSecretLabel: 'API Secret',
+    helpUrl: 'https://help.coinbase.com/en/exchange/managing-my-account/how-to-create-an-api-key',
+    comingSoon: true,
+  },
+  {
+    id: 'ROBINHOOD',
+    name: 'Robinhood',
+    logo: 'RH',
+    description: 'Import your Robinhood portfolio',
+    requiresSecret: false,
+    apiKeyLabel: 'API Token',
+    comingSoon: true,
+  },
+  {
+    id: 'CHARLES_SCHWAB',
+    name: 'Charles Schwab',
+    logo: 'SCH',
+    description: 'Sync your Schwab brokerage account',
+    requiresSecret: true,
+    apiKeyLabel: 'App Key',
+    apiSecretLabel: 'App Secret',
+    comingSoon: true,
+  },
+];
+
+function BrokerConnectionsSection({ portfolioId }: { portfolioId: string }) {
+  const [connections, setConnections] = useState<BrokerConnection[]>([]);
+  const [selectedBroker, setSelectedBroker] = useState<typeof BROKERS[0] | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchConnections = async () => {
+    try {
+      const data = await api.brokers.list();
+      setConnections(data);
+    } catch (error) {
+      console.error('Failed to fetch broker connections:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchConnections();
+  }, []);
+
+  const getConnectionForBroker = (brokerId: string) => {
+    return connections.find(c => c.broker === brokerId);
+  };
+
+  return (
+    <div className="p-6 bg-card border border-border rounded-xl">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="size-12 rounded-xl bg-primary/10 flex items-center justify-center">
+          <Link2 className="size-6 text-primary" />
+        </div>
+        <div>
+          <h3 className="font-semibold">Connect Broker</h3>
+          <p className="text-sm text-muted-foreground">Auto-sync with your brokerage account using API keys</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {BROKERS.map((broker) => {
+          const connection = getConnectionForBroker(broker.id);
+          return (
+            <BrokerCard
+              key={broker.id}
+              broker={broker}
+              connection={connection}
+              onConnect={() => setSelectedBroker(broker)}
+              onSync={() => handleSync(connection!, portfolioId, fetchConnections)}
+              onDisconnect={() => handleDisconnect(connection!, fetchConnections)}
+            />
+          );
+        })}
+      </div>
+
+      <p className="text-sm text-muted-foreground mt-6 text-center">
+        Your API keys are encrypted and stored securely. We only use read-only access to sync your positions.
+      </p>
+
+      {/* Connect Broker Modal */}
+      {selectedBroker && (
+        <ConnectBrokerModal
+          broker={selectedBroker}
+          portfolioId={portfolioId}
+          onClose={() => setSelectedBroker(null)}
+          onConnected={() => {
+            setSelectedBroker(null);
+            fetchConnections();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+async function handleSync(connection: BrokerConnection, portfolioId: string, onComplete: () => void) {
+  toast.loading('Syncing positions...', { id: 'sync' });
+  try {
+    const result = await api.brokers.sync(connection.id, portfolioId);
+    toast.success(result.message, { id: 'sync' });
+    onComplete();
+  } catch (error: any) {
+    toast.error(error.message || 'Failed to sync', { id: 'sync' });
+  }
+}
+
+async function handleDisconnect(connection: BrokerConnection, onComplete: () => void) {
+  if (!confirm('Are you sure you want to disconnect this broker?')) return;
+
+  try {
+    await api.brokers.disconnect(connection.id);
+    toast.success('Broker disconnected');
+    onComplete();
+  } catch (error: any) {
+    toast.error(error.message || 'Failed to disconnect');
+  }
+}
+
 function BrokerCard({
-  name,
-  logo,
-  description,
-  status
+  broker,
+  connection,
+  onConnect,
+  onSync,
+  onDisconnect,
 }: {
-  name: string;
-  logo: string;
-  description: string;
-  status: 'connected' | 'available' | 'coming_soon';
+  broker: typeof BROKERS[0];
+  connection?: BrokerConnection;
+  onConnect: () => void;
+  onSync: () => void;
+  onDisconnect: () => void;
 }) {
+  const isConnected = connection?.status === 'CONNECTED';
+  const isSyncing = connection?.status === 'SYNCING';
+  const hasError = connection?.status === 'ERROR';
+
   return (
     <div className={cn(
       "p-4 border rounded-xl transition-colors",
-      status === 'coming_soon' ? "border-border opacity-60" : "border-border hover:border-primary/50 cursor-pointer"
+      broker.comingSoon ? "border-border opacity-60" : "border-border hover:border-primary/50"
     )}>
       <div className="flex items-center gap-3 mb-2">
-        <div className="size-10 rounded-lg bg-secondary flex items-center justify-center text-xs font-bold">
-          {logo}
+        <div className={cn(
+          "size-10 rounded-lg flex items-center justify-center text-xs font-bold",
+          isConnected ? "bg-green-500/20 text-green-500" : "bg-secondary"
+        )}>
+          {broker.logo}
         </div>
         <div className="flex-1">
-          <h4 className="font-medium text-sm">{name}</h4>
-          {status === 'coming_soon' && (
+          <h4 className="font-medium text-sm">{broker.name}</h4>
+          {broker.comingSoon && (
             <span className="text-xs text-muted-foreground">Coming Soon</span>
           )}
-          {status === 'connected' && (
+          {isConnected && (
             <span className="text-xs text-green-500">Connected</span>
           )}
+          {isSyncing && (
+            <span className="text-xs text-blue-500">Syncing...</span>
+          )}
+          {hasError && (
+            <span className="text-xs text-red-500">Error</span>
+          )}
         </div>
-        {status !== 'coming_soon' && (
-          <ExternalLink className="size-4 text-muted-foreground" />
-        )}
       </div>
-      <p className="text-xs text-muted-foreground">{description}</p>
+      <p className="text-xs text-muted-foreground mb-3">{broker.description}</p>
+
+      {!broker.comingSoon && (
+        <div className="flex gap-2">
+          {isConnected ? (
+            <>
+              <button
+                onClick={onSync}
+                disabled={isSyncing}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+              >
+                <RefreshCw className={cn("size-3", isSyncing && "animate-spin")} />
+                Sync
+              </button>
+              <button
+                onClick={onDisconnect}
+                className="px-3 py-1.5 text-xs bg-secondary text-secondary-foreground rounded-lg hover:bg-secondary/80"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={onConnect}
+              className="w-full flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+            >
+              <Key className="size-3" />
+              Connect
+            </button>
+          )}
+        </div>
+      )}
+
+      {connection?.lastSyncAt && (
+        <p className="text-xs text-muted-foreground mt-2">
+          Last sync: {new Date(connection.lastSyncAt).toLocaleDateString()}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ConnectBrokerModal({
+  broker,
+  portfolioId,
+  onClose,
+  onConnected,
+}: {
+  broker: typeof BROKERS[0];
+  portfolioId: string;
+  onClose: () => void;
+  onConnected: () => void;
+}) {
+  const [apiKey, setApiKey] = useState('');
+  const [apiSecret, setApiSecret] = useState('');
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  const handleConnect = async () => {
+    if (!apiKey) {
+      toast.error('Please enter your API key');
+      return;
+    }
+    if (broker.requiresSecret && !apiSecret) {
+      toast.error('Please enter your API secret');
+      return;
+    }
+
+    setIsConnecting(true);
+    try {
+      const result = await api.brokers.connect({
+        broker: broker.id,
+        apiKey,
+        apiSecret: broker.requiresSecret ? apiSecret : undefined,
+      });
+
+      if (result.status === 'CONNECTED') {
+        toast.success('Broker connected! Syncing positions...');
+        // Auto-sync after connecting
+        try {
+          await api.brokers.sync(result.id, portfolioId);
+          toast.success('Positions synced successfully!');
+        } catch (err: any) {
+          toast.warning('Connected but sync failed. Try syncing manually.');
+        }
+        onConnected();
+      } else {
+        toast.error(result.message || 'Failed to connect. Check your API credentials.');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to connect broker');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="size-12 rounded-xl bg-primary/10 flex items-center justify-center font-bold">
+            {broker.logo}
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">Connect {broker.name}</h2>
+            <p className="text-sm text-muted-foreground">Enter your API credentials</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">{broker.apiKeyLabel}</label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="Enter your API key"
+              className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none font-mono text-sm"
+              autoFocus
+            />
+          </div>
+
+          {broker.requiresSecret && (
+            <div>
+              <label className="block text-sm font-medium mb-2">{broker.apiSecretLabel}</label>
+              <input
+                type="password"
+                value={apiSecret}
+                onChange={(e) => setApiSecret(e.target.value)}
+                placeholder="Enter your API secret"
+                className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none font-mono text-sm"
+              />
+            </div>
+          )}
+
+          {broker.helpUrl && (
+            <a
+              href={broker.helpUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <ExternalLink className="size-3" />
+              How to get your API key
+            </a>
+          )}
+
+          <div className="bg-secondary/50 rounded-lg p-3 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground mb-1">Security Note:</p>
+            <p>Your API keys are encrypted and stored securely. We recommend using read-only API keys when available.</p>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 bg-secondary text-secondary-foreground rounded-xl font-medium hover:bg-secondary/80 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConnect}
+              disabled={isConnecting}
+              className="flex-1 px-4 py-2.5 bg-primary text-primary-foreground rounded-xl font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              {isConnecting ? 'Connecting...' : 'Connect'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

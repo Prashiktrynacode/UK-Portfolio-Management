@@ -93,8 +93,16 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/refresh/:portfolioId', async (request, reply) => {
     const { portfolioId } = request.params;
 
-    await updatePortfolioMarketData(portfolioId);
-
-    return { success: true, message: 'Portfolio market data refreshed' };
+    try {
+      await updatePortfolioMarketData(portfolioId);
+      return { success: true, message: 'Portfolio market data refreshed' };
+    } catch (error: any) {
+      console.error('Error refreshing portfolio market data:', error);
+      return reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: error.message || 'Failed to refresh market data',
+      });
+    }
   });
 };

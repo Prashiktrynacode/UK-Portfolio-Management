@@ -256,6 +256,26 @@ export const api = {
     refreshPortfolio: (portfolioId: string) =>
       apiFetch<{ success: boolean }>(`/market/refresh/${portfolioId}`, { method: 'POST' }),
   },
+
+  // Broker connection endpoints
+  brokers: {
+    list: () => apiFetch<BrokerConnection[]>('/brokers'),
+
+    connect: (data: ConnectBrokerInput) =>
+      apiFetch<BrokerConnectResult>('/brokers/connect', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    sync: (connectionId: string, portfolioId: string) =>
+      apiFetch<BrokerSyncResult>(`/brokers/${connectionId}/sync`, {
+        method: 'POST',
+        body: JSON.stringify({ portfolioId }),
+      }),
+
+    disconnect: (connectionId: string) =>
+      apiFetch<{ success: boolean }>(`/brokers/${connectionId}`, { method: 'DELETE' }),
+  },
 };
 
 // ============================================
@@ -654,4 +674,35 @@ export interface TickerSearchResult {
   name: string;
   exchange: string;
   type: string;
+}
+
+export interface BrokerConnection {
+  id: string;
+  broker: string;
+  status: 'PENDING' | 'CONNECTED' | 'SYNCING' | 'ERROR' | 'DISCONNECTED';
+  lastSyncAt?: string;
+  lastSyncStatus?: string;
+  accountIds: string[];
+  createdAt: string;
+}
+
+export interface ConnectBrokerInput {
+  broker: string;
+  apiKey: string;
+  apiSecret?: string;
+  accountId?: string;
+}
+
+export interface BrokerConnectResult {
+  id: string;
+  broker: string;
+  status: string;
+  message: string;
+}
+
+export interface BrokerSyncResult {
+  success: boolean;
+  imported: number;
+  failed: number;
+  message: string;
 }
