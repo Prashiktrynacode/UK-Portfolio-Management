@@ -211,7 +211,7 @@ export const brokerRoutes: FastifyPluginAsync = async (fastify) => {
               data: {
                 portfolioId,
                 ticker: pos.ticker.toUpperCase(),
-                assetType: pos.assetType || 'STOCK',
+                assetType: (pos.assetType || 'STOCK') as any,
                 name: pos.name,
                 quantity: pos.quantity,
                 avgCostBasis: pos.avgCostBasis,
@@ -419,7 +419,7 @@ async function fetchTrading212Positions(apiKey: string): Promise<BrokerPosition[
     throw new Error('Failed to fetch Trading 212 positions');
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as any[];
 
   return data.map((pos: any) => ({
     ticker: pos.ticker,
@@ -453,7 +453,7 @@ async function fetchAlpacaPositions(apiKey: string, apiSecret: string): Promise<
     throw new Error('Failed to fetch Alpaca positions');
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as any[];
 
   return data.map((pos: any) => ({
     ticker: pos.symbol,
