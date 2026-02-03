@@ -107,17 +107,20 @@ model Position {
   id            String    @id @default(cuid())
   portfolioId   String    @map("portfolio_id")
   portfolio     Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-  
+
   // Asset identification
   ticker        String
   assetType     AssetType @default(STOCK) @map("asset_type")
   name          String?
   exchange      String?
-  
+
+  // Currency support
+  currency      String    @default("USD") // USD, INR, GBP, EUR, etc.
+
   // Current position
   quantity      Decimal   @db.Decimal(18, 8)
   avgCostBasis  Decimal   @map("avg_cost_basis") @db.Decimal(18, 4)
-  
+
   // Latest market data (cached)
   currentPrice  Decimal?  @map("current_price") @db.Decimal(18, 4)
   dayChange     Decimal?  @map("day_change") @db.Decimal(18, 4)
@@ -125,20 +128,27 @@ model Position {
   marketValue   Decimal?  @map("market_value") @db.Decimal(18, 2)
   unrealizedPL  Decimal?  @map("unrealized_pl") @db.Decimal(18, 2)
   unrealizedPLPercent Decimal? @map("unrealized_pl_percent") @db.Decimal(8, 4)
-  
+
+  // Fees tracking (expense ratio as annual %, management fees, etc.)
+  expenseRatio  Decimal?  @map("expense_ratio") @db.Decimal(6, 4) // Annual expense ratio as percentage
+  annualFees    Decimal?  @map("annual_fees") @db.Decimal(18, 2)  // Calculated annual fees in currency
+
   // Sector/category classification
   sector        String?
   industry      String?
-  
+
+  // For mutual funds - scheme code
+  schemeCode    String?   @map("scheme_code")
+
   // Tax lot tracking
   lots          TaxLot[]
-  
+
   // Price history for sparklines
   priceHistory  PositionPriceHistory[]
-  
+
   // Transactions
   transactions  Transaction[]
-  
+
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 

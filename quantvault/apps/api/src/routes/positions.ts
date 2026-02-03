@@ -18,6 +18,9 @@ interface CreatePositionBody {
   quantity: number;
   avgCostBasis: number;
   purchaseDate?: string;
+  currency?: string;      // USD, INR, GBP, EUR, etc.
+  expenseRatio?: number;  // Annual expense ratio as percentage
+  schemeCode?: string;    // For Indian mutual funds
 }
 
 interface UpdatePositionBody {
@@ -136,14 +139,17 @@ export async function positionsRoutes(fastify: FastifyInstance) {
     '/',
     async (request, reply) => {
       const userId = request.user!.id;
-      const { 
-        portfolioId, 
-        ticker, 
-        assetType, 
+      const {
+        portfolioId,
+        ticker,
+        assetType,
         name,
-        quantity, 
-        avgCostBasis, 
-        purchaseDate 
+        quantity,
+        avgCostBasis,
+        purchaseDate,
+        currency,
+        expenseRatio,
+        schemeCode,
       } = request.body;
 
       // Verify portfolio ownership
@@ -172,6 +178,13 @@ export async function positionsRoutes(fastify: FastifyInstance) {
         });
       }
 
+      // Calculate annual fees if expense ratio is provided
+      const marketValue = quantity * avgCostBasis;
+      const annualFees = expenseRatio ? (marketValue * expenseRatio) / 100 : null;
+
+      // Determine currency based on asset type or explicit setting
+      const positionCurrency = currency || (ticker.toUpperCase().startsWith('MF') ? 'INR' : 'USD');
+
       // Create position with initial tax lot
       const position = await prisma.position.create({
         data: {
@@ -181,6 +194,10 @@ export async function positionsRoutes(fastify: FastifyInstance) {
           name,
           quantity: new Decimal(quantity),
           avgCostBasis: new Decimal(avgCostBasis),
+          currency: positionCurrency,
+          expenseRatio: expenseRatio ? new Decimal(expenseRatio) : null,
+          annualFees: annualFees ? new Decimal(annualFees) : null,
+          schemeCode: schemeCode || (ticker.toUpperCase().startsWith('MF') ? ticker.toUpperCase().substring(2) : null),
           lots: {
             create: {
               quantity: new Decimal(quantity),

@@ -127,10 +127,72 @@ async function fetchYahooQuote(ticker: string): Promise<QuoteResult | null> {
 }
 
 /**
+ * Fetch NAV for Indian Mutual Fund from mfapi.in
+ */
+async function fetchMutualFundNAV(schemeCode: string): Promise<QuoteResult | null> {
+  try {
+    const response = await fetch(`https://api.mfapi.in/mf/${schemeCode}/latest`);
+
+    if (!response.ok) {
+      console.error(`MFAPI error for ${schemeCode}: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json() as any;
+
+    if (!data.data || data.data.length === 0) {
+      console.error(`No NAV data found for ${schemeCode}`);
+      return null;
+    }
+
+    const nav = parseFloat(data.data[0].nav || '0');
+    const schemeName = data.meta?.scheme_name || `MF${schemeCode}`;
+
+    return {
+      ticker: `MF${schemeCode}`,
+      price: nav,
+      change: 0, // MFAPI doesn't provide daily change
+      changePercent: 0,
+      dayHigh: null,
+      dayLow: null,
+      volume: null,
+      weekHigh52: null,
+      weekLow52: null,
+      marketCap: null,
+      peRatio: null,
+      dividendYield: null,
+      name: schemeName,
+      sector: data.meta?.scheme_category || 'Mutual Fund',
+      industry: data.meta?.fund_house || null,
+      exchange: 'AMFI',
+    };
+  } catch (error) {
+    console.error(`Error fetching NAV for ${schemeCode}:`, error);
+    return null;
+  }
+}
+
+/**
  * Get quote with caching
  */
 export async function getQuote(ticker: string): Promise<QuoteResult | null> {
   const normalizedTicker = ticker.toUpperCase();
+
+  // Check if it's an Indian Mutual Fund (starts with MF)
+  if (normalizedTicker.startsWith('MF') && normalizedTicker.length > 2) {
+    const schemeCode = normalizedTicker.substring(2);
+    // Check cache first
+    const cached = quoteCache.get(normalizedTicker);
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+      return cached.data;
+    }
+
+    const mfQuote = await fetchMutualFundNAV(schemeCode);
+    if (mfQuote) {
+      quoteCache.set(normalizedTicker, { data: mfQuote, timestamp: Date.now() });
+    }
+    return mfQuote;
+  }
 
   // Check memory cache first
   const cached = quoteCache.get(normalizedTicker);

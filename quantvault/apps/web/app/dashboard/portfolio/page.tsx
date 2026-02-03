@@ -209,6 +209,8 @@ function AddPositionModal({
   const [quantity, setQuantity] = useState('');
   const [avgCostBasis, setAvgCostBasis] = useState('');
   const [assetType, setAssetType] = useState('STOCK');
+  const [currency, setCurrency] = useState('USD');
+  const [expenseRatio, setExpenseRatio] = useState('');
   const [creating, setCreating] = useState(false);
 
   // Mutual fund search state
@@ -279,6 +281,9 @@ function AddPositionModal({
         quantity: parseFloat(quantity),
         avgCostBasis: parseFloat(avgCostBasis),
         assetType: mode === 'mf' ? 'MUTUAL_FUND' : assetType,
+        currency: mode === 'mf' ? 'INR' : currency,
+        expenseRatio: expenseRatio ? parseFloat(expenseRatio) : undefined,
+        schemeCode: selectedMF?.schemeCode || undefined,
       });
       toast.success(`Position ${selectedMF?.schemeName || ticker.toUpperCase()} added successfully!`);
       onCreated(newPosition);
@@ -426,7 +431,7 @@ function AddPositionModal({
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">
-                {mode === 'mf' ? 'Avg NAV (₹)' : 'Avg Cost Basis ($)'}
+                {mode === 'mf' ? 'Avg NAV (₹)' : 'Avg Cost Basis'}
               </label>
               <input
                 type="number"
@@ -435,6 +440,43 @@ function AddPositionModal({
                 placeholder="0.00"
                 step="0.0001"
                 min="0"
+                className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {mode === 'stock' && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Currency</label>
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                >
+                  <option value="USD">USD ($)</option>
+                  <option value="INR">INR (₹)</option>
+                  <option value="GBP">GBP (£)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="CAD">CAD ($)</option>
+                  <option value="AUD">AUD ($)</option>
+                  <option value="JPY">JPY (¥)</option>
+                </select>
+              </div>
+            )}
+            <div className={mode === 'stock' ? '' : 'col-span-2'}>
+              <label className="block text-sm font-medium mb-2">
+                Expense Ratio (% p.a.)
+                <span className="text-xs text-muted-foreground ml-1">Optional</span>
+              </label>
+              <input
+                type="number"
+                value={expenseRatio}
+                onChange={(e) => setExpenseRatio(e.target.value)}
+                placeholder="e.g., 0.75"
+                step="0.01"
+                min="0"
+                max="10"
                 className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
               />
             </div>

@@ -288,6 +288,31 @@ export async function analysisRoutes(fastify: FastifyInstance) {
       };
     }
   );
+
+  // Get fees summary for portfolio
+  fastify.get<{ Querystring: { portfolioId: string } }>(
+    '/fees',
+    async (request, reply) => {
+      const userId = request.user!.id;
+      const { portfolioId } = request.query;
+
+      const portfolio = await prisma.portfolio.findFirst({
+        where: { id: portfolioId, userId },
+      });
+
+      if (!portfolio) {
+        return reply.status(404).send({
+          statusCode: 404,
+          error: 'Not Found',
+          message: 'Portfolio not found',
+        });
+      }
+
+      const feesSummary = await calculateFeesSummary(portfolioId);
+
+      return feesSummary;
+    }
+  );
 }
 
 // Helper function to apply simulated changes
@@ -356,8 +381,63 @@ function applySimulatedChanges(
   return positions.map(p => ({
     ...p,
     marketValue: Number(p.quantity) * Number(p.currentPrice || p.avgCostBasis),
-    weight: totalValue > 0 
+    weight: totalValue > 0
       ? ((Number(p.quantity) * Number(p.currentPrice || p.avgCostBasis)) / totalValue * 100)
       : 0,
   }));
+}
+
+// Fees summary calculation helper
+export async function calculateFeesSummary(portfolioId: string) {
+  const positions = await prisma.position.findMany({
+    where: { portfolioId },
+    select: {
+      ticker: true,
+      name: true,
+      currency: true,
+      marketValue: true,
+      expenseRatio: true,
+      annualFees: true,
+      assetType: true,
+    },
+  });
+
+  let totalAnnualFeesUSD = 0;
+  let totalAnnualFeesINR = 0;
+
+  const positionFees = positions.map(p => {
+    const marketValue = Number(p.marketValue) || 0;
+    const expenseRatio = Number(p.expenseRatio) || 0;
+    const annualFee = expenseRatio > 0 ? (marketValue * expenseRatio) / 100 : 0;
+    const monthlyFee = annualFee / 12;
+
+    if (p.currency === 'INR') {
+      totalAnnualFeesINR += annualFee;
+    } else {
+      totalAnnualFeesUSD += annualFee;
+    }
+
+    return {
+      ticker: p.ticker,
+      name: p.name,
+      currency: p.currency,
+      marketValue,
+      expenseRatio,
+      annualFee,
+      monthlyFee,
+      assetType: p.assetType,
+    };
+  }).filter(p => p.expenseRatio > 0);
+
+  return {
+    positions: positionFees,
+    summary: {
+      totalAnnualFeesUSD,
+      totalAnnualFeesINR,
+      totalMonthlyFeesUSD: totalAnnualFeesUSD / 12,
+      totalMonthlyFeesINR: totalAnnualFeesINR / 12,
+      positionsWithFees: positionFees.length,
+      totalPositions: positions.length,
+    },
+  };
 }

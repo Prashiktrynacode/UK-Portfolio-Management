@@ -180,20 +180,23 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    
+
     getCorrelation: (portfolioId: string, additionalTickers?: string[]) =>
       apiFetch<CorrelationMatrix>('/analysis/correlation', {
         params: { portfolioId, additionalTickers: additionalTickers?.join(',') },
       }),
-    
+
     getRiskAnalysis: (portfolioId: string) =>
       apiFetch<RiskAnalysis>('/analysis/risk', { params: { portfolioId } }),
-    
+
     getOptimizations: (portfolioId: string, goal?: string) =>
       apiFetch<OptimizationResult>('/analysis/optimize', { params: { portfolioId, goal } }),
-    
+
     getBreakdown: (portfolioId: string) =>
       apiFetch<AllocationBreakdown>('/analysis/breakdown', { params: { portfolioId } }),
+
+    getFeesSummary: (portfolioId: string) =>
+      apiFetch<FeesSummary>('/analysis/fees', { params: { portfolioId } }),
   },
 
   // Import endpoints
@@ -642,6 +645,9 @@ export interface CreatePositionInput {
   quantity: number;
   avgCostBasis: number;
   purchaseDate?: string;
+  currency?: string;      // USD, INR, GBP, EUR, etc.
+  expenseRatio?: number;  // Annual expense ratio as percentage
+  schemeCode?: string;    // For Indian mutual funds
 }
 
 export interface AddLotInput {
@@ -740,4 +746,28 @@ export interface MutualFundHistory {
   schemeType: string;
   schemeCategory: string;
   data: { date: string; nav: number }[];
+}
+
+// Fees tracking types
+export interface PositionFee {
+  ticker: string;
+  name: string | null;
+  currency: string;
+  marketValue: number;
+  expenseRatio: number;
+  annualFee: number;
+  monthlyFee: number;
+  assetType: string;
+}
+
+export interface FeesSummary {
+  positions: PositionFee[];
+  summary: {
+    totalAnnualFeesUSD: number;
+    totalAnnualFeesINR: number;
+    totalMonthlyFeesUSD: number;
+    totalMonthlyFeesINR: number;
+    positionsWithFees: number;
+    totalPositions: number;
+  };
 }
