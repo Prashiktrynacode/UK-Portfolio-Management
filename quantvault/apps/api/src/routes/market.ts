@@ -105,4 +105,118 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
   });
+
+  // ============================================
+  // INDIAN MUTUAL FUND ENDPOINTS (using mfapi.in)
+  // ============================================
+
+  // Search Indian mutual funds by name
+  fastify.get<{
+    Querystring: { q: string };
+  }>('/mf/search', async (request, reply) => {
+    const { q } = request.query;
+
+    if (!q || q.length < 2) {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Search query must be at least 2 characters',
+      });
+    }
+
+    try {
+      const response = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`);
+
+      if (!response.ok) {
+        throw new Error('Failed to search mutual funds');
+      }
+
+      const data = await response.json() as any[];
+
+      // Return formatted results
+      return {
+        results: data.slice(0, 50).map((fund: any) => ({
+          schemeCode: fund.schemeCode,
+          schemeName: fund.schemeName,
+        })),
+      };
+    } catch (error: any) {
+      console.error('MF search error:', error);
+      return reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: error.message || 'Failed to search mutual funds',
+      });
+    }
+  });
+
+  // Get latest NAV for a mutual fund scheme
+  fastify.get<{
+    Params: { schemeCode: string };
+  }>('/mf/:schemeCode/latest', async (request, reply) => {
+    const { schemeCode } = request.params;
+
+    try {
+      const response = await fetch(`https://api.mfapi.in/mf/${schemeCode}/latest`);
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch NAV');
+      }
+
+      const data = await response.json() as any;
+
+      return {
+        schemeCode: data.meta?.scheme_code || schemeCode,
+        schemeName: data.meta?.scheme_name || 'Unknown',
+        fundHouse: data.meta?.fund_house || 'Unknown',
+        schemeType: data.meta?.scheme_type || 'Unknown',
+        schemeCategory: data.meta?.scheme_category || 'Unknown',
+        nav: parseFloat(data.data?.[0]?.nav || '0'),
+        date: data.data?.[0]?.date || null,
+      };
+    } catch (error: any) {
+      console.error('MF NAV fetch error:', error);
+      return reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: error.message || 'Failed to fetch NAV',
+      });
+    }
+  });
+
+  // Get NAV history for a mutual fund scheme
+  fastify.get<{
+    Params: { schemeCode: string };
+  }>('/mf/:schemeCode/history', async (request, reply) => {
+    const { schemeCode } = request.params;
+
+    try {
+      const response = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch NAV history');
+      }
+
+      const data = await response.json() as any;
+
+      return {
+        schemeCode: data.meta?.scheme_code || schemeCode,
+        schemeName: data.meta?.scheme_name || 'Unknown',
+        fundHouse: data.meta?.fund_house || 'Unknown',
+        schemeType: data.meta?.scheme_type || 'Unknown',
+        schemeCategory: data.meta?.scheme_category || 'Unknown',
+        data: (data.data || []).slice(0, 365).map((item: any) => ({
+          date: item.date,
+          nav: parseFloat(item.nav),
+        })),
+      };
+    } catch (error: any) {
+      console.error('MF history fetch error:', error);
+      return reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: error.message || 'Failed to fetch NAV history',
+      });
+    }
+  });
 };

@@ -255,6 +255,16 @@ export const api = {
 
     refreshPortfolio: (portfolioId: string) =>
       apiFetch<{ success: boolean }>(`/market/refresh/${portfolioId}`, { method: 'POST' }),
+
+    // Indian Mutual Fund endpoints
+    searchMutualFunds: (query: string) =>
+      apiFetch<{ results: MutualFundSearchResult[] }>('/market/mf/search', { params: { q: query } }),
+
+    getMutualFundNAV: (schemeCode: string) =>
+      apiFetch<MutualFundNAV>(`/market/mf/${schemeCode}/latest`),
+
+    getMutualFundHistory: (schemeCode: string) =>
+      apiFetch<MutualFundHistory>(`/market/mf/${schemeCode}/history`),
   },
 
   // Broker connection endpoints
@@ -705,4 +715,29 @@ export interface BrokerSyncResult {
   imported: number;
   failed: number;
   message: string;
+}
+
+// Indian Mutual Fund types
+export interface MutualFundSearchResult {
+  schemeCode: string;
+  schemeName: string;
+}
+
+export interface MutualFundNAV {
+  schemeCode: string;
+  schemeName: string;
+  fundHouse: string;
+  schemeType: string;
+  schemeCategory: string;
+  nav: number;
+  date: string | null;
+}
+
+export interface MutualFundHistory {
+  schemeCode: string;
+  schemeName: string;
+  fundHouse: string;
+  schemeType: string;
+  schemeCategory: string;
+  data: { date: string; nav: number }[];
 }

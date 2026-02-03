@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PieChart, Plus, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { PieChart, Plus, TrendingUp, TrendingDown, Loader2, Trash2, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePortfolio } from '../layout';
-import { api, Position, PositionWithMeta } from '@/lib/api-client';
+import { api, Position, PositionWithMeta, MutualFundSearchResult, MutualFundNAV } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
 export default function PortfolioPage() {
@@ -37,6 +37,21 @@ export default function PortfolioPage() {
     setPositions(prev => [...prev, newPosition as PositionWithMeta]);
     setShowAddModal(false);
     fetchPositions(); // Refresh to get full position data
+  };
+
+  const handleDeletePosition = async (position: PositionWithMeta) => {
+    if (!confirm(`Are you sure you want to delete ${position.ticker}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await api.positions.delete(position.id);
+      toast.success(`${position.ticker} removed from portfolio`);
+      setPositions(prev => prev.filter(p => p.id !== position.id));
+    } catch (error: any) {
+      console.error('Delete position error:', error);
+      toast.error(error.message || 'Failed to delete position');
+    }
   };
 
   if (portfolioLoading) {
@@ -116,6 +131,7 @@ export default function PortfolioPage() {
                 <th className="text-right px-4 py-3 text-sm font-medium text-muted-foreground">Current</th>
                 <th className="text-right px-4 py-3 text-sm font-medium text-muted-foreground">Market Value</th>
                 <th className="text-right px-4 py-3 text-sm font-medium text-muted-foreground">P&L</th>
+                <th className="text-center px-4 py-3 text-sm font-medium text-muted-foreground w-16">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -150,6 +166,15 @@ export default function PortfolioPage() {
                         <span className="text-xs">({isPositive ? '+' : ''}{Number(plPercent).toFixed(2)}%)</span>
                       </div>
                     </td>
+                    <td className="text-center px-4 py-4">
+                      <button
+                        onClick={() => handleDeletePosition(position)}
+                        className="p-2 hover:bg-red-500/20 rounded-lg transition-colors group"
+                        title="Remove position"
+                      >
+                        <Trash2 className="size-4 text-muted-foreground group-hover:text-red-500" />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -179,15 +204,61 @@ function AddPositionModal({
   onClose: () => void;
   onCreated: (position: Position) => void;
 }) {
+  const [mode, setMode] = useState<'stock' | 'mf'>('stock');
   const [ticker, setTicker] = useState('');
   const [quantity, setQuantity] = useState('');
   const [avgCostBasis, setAvgCostBasis] = useState('');
   const [assetType, setAssetType] = useState('STOCK');
   const [creating, setCreating] = useState(false);
 
+  // Mutual fund search state
+  const [mfSearchQuery, setMfSearchQuery] = useState('');
+  const [mfSearchResults, setMfSearchResults] = useState<MutualFundSearchResult[]>([]);
+  const [selectedMF, setSelectedMF] = useState<MutualFundNAV | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isFetchingNAV, setIsFetchingNAV] = useState(false);
+
+  const handleSearchMF = async () => {
+    if (mfSearchQuery.length < 2) {
+      toast.error('Please enter at least 2 characters to search');
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const result = await api.market.searchMutualFunds(mfSearchQuery);
+      setMfSearchResults(result.results);
+      if (result.results.length === 0) {
+        toast.info('No mutual funds found');
+      }
+    } catch (error: any) {
+      console.error('MF search error:', error);
+      toast.error(error.message || 'Failed to search mutual funds');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectMF = async (mf: MutualFundSearchResult) => {
+    setIsFetchingNAV(true);
+    try {
+      const navData = await api.market.getMutualFundNAV(mf.schemeCode);
+      setSelectedMF(navData);
+      setTicker(`MF${mf.schemeCode}`);
+      setAvgCostBasis(navData.nav.toString());
+      setMfSearchResults([]);
+      toast.success(`Current NAV: ₹${navData.nav.toFixed(4)}`);
+    } catch (error: any) {
+      console.error('NAV fetch error:', error);
+      toast.error(error.message || 'Failed to fetch NAV');
+    } finally {
+      setIsFetchingNAV(false);
+    }
+  };
+
   const handleCreate = async () => {
     if (!ticker.trim()) {
-      toast.error('Please enter a ticker symbol');
+      toast.error('Please enter a ticker symbol or select a mutual fund');
       return;
     }
     if (!quantity || parseFloat(quantity) <= 0) {
@@ -204,11 +275,12 @@ function AddPositionModal({
       const newPosition = await api.positions.create({
         portfolioId,
         ticker: ticker.trim().toUpperCase(),
+        name: selectedMF?.schemeName || undefined,
         quantity: parseFloat(quantity),
         avgCostBasis: parseFloat(avgCostBasis),
-        assetType,
+        assetType: mode === 'mf' ? 'MUTUAL_FUND' : assetType,
       });
-      toast.success(`Position ${ticker.toUpperCase()} added successfully!`);
+      toast.success(`Position ${selectedMF?.schemeName || ticker.toUpperCase()} added successfully!`);
       onCreated(newPosition);
     } catch (error: any) {
       console.error('Create position error:', error);
@@ -220,23 +292,128 @@ function AddPositionModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md animate-in fade-in zoom-in-95 duration-200">
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
         <h2 className="text-xl font-bold mb-4">Add Position</h2>
+
+        {/* Mode Toggle */}
+        <div className="flex gap-2 mb-4 p-1 bg-secondary/30 rounded-lg">
+          <button
+            onClick={() => { setMode('stock'); setSelectedMF(null); setTicker(''); }}
+            className={cn(
+              "flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+              mode === 'stock' ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+            )}
+          >
+            Stock / ETF
+          </button>
+          <button
+            onClick={() => { setMode('mf'); setTicker(''); setAssetType('MUTUAL_FUND'); }}
+            className={cn(
+              "flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+              mode === 'mf' ? "bg-primary text-primary-foreground" : "hover:bg-secondary"
+            )}
+          >
+            🇮🇳 Indian Mutual Fund
+          </button>
+        </div>
+
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">Ticker Symbol</label>
-            <input
-              type="text"
-              value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              placeholder="e.g., AAPL, MSFT, GOOGL"
-              className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none uppercase"
-              autoFocus
-            />
-          </div>
+          {mode === 'stock' ? (
+            <>
+              <div>
+                <label className="block text-sm font-medium mb-2">Ticker Symbol</label>
+                <input
+                  type="text"
+                  value={ticker}
+                  onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                  placeholder="e.g., AAPL, MSFT, GOOGL"
+                  className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none uppercase"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Asset Type</label>
+                <select
+                  value={assetType}
+                  onChange={(e) => setAssetType(e.target.value)}
+                  className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                >
+                  <option value="STOCK">Stock</option>
+                  <option value="ETF">ETF</option>
+                  <option value="MUTUAL_FUND">Mutual Fund</option>
+                  <option value="BOND">Bond</option>
+                  <option value="CRYPTO">Crypto</option>
+                  <option value="OPTION">Option</option>
+                  <option value="REIT">REIT</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Mutual Fund Search */}
+              <div>
+                <label className="block text-sm font-medium mb-2">Search by Name or Scheme Code</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={mfSearchQuery}
+                    onChange={(e) => setMfSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearchMF()}
+                    placeholder="e.g., HDFC Flexi Cap, Axis Bluechip, 120503"
+                    className="flex-1 px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSearchMF}
+                    disabled={isSearching}
+                    className="px-4 py-3 bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {isSearching ? <Loader2 className="size-5 animate-spin" /> : <Search className="size-5" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Search Results */}
+              {mfSearchResults.length > 0 && (
+                <div className="border border-border rounded-xl max-h-48 overflow-y-auto">
+                  {mfSearchResults.map((mf) => (
+                    <button
+                      key={mf.schemeCode}
+                      onClick={() => handleSelectMF(mf)}
+                      disabled={isFetchingNAV}
+                      className="w-full text-left px-4 py-3 hover:bg-secondary/50 border-b border-border last:border-0 transition-colors disabled:opacity-50"
+                    >
+                      <div className="font-medium text-sm">{mf.schemeName}</div>
+                      <div className="text-xs text-muted-foreground">Code: {mf.schemeCode}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Selected Mutual Fund */}
+              {selectedMF && (
+                <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
+                  <div className="font-medium text-green-500 text-sm mb-1">Selected Fund</div>
+                  <div className="font-semibold">{selectedMF.schemeName}</div>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    {selectedMF.fundHouse} • {selectedMF.schemeCategory}
+                  </div>
+                  <div className="text-sm mt-2">
+                    <span className="text-muted-foreground">Current NAV:</span>{' '}
+                    <span className="font-mono font-semibold">₹{selectedMF.nav.toFixed(4)}</span>
+                    {selectedMF.date && <span className="text-xs text-muted-foreground ml-2">({selectedMF.date})</span>}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-2">Quantity</label>
+              <label className="block text-sm font-medium mb-2">
+                {mode === 'mf' ? 'Units' : 'Quantity'}
+              </label>
               <input
                 type="number"
                 value={quantity}
@@ -248,35 +425,21 @@ function AddPositionModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">Avg Cost Basis ($)</label>
+              <label className="block text-sm font-medium mb-2">
+                {mode === 'mf' ? 'Avg NAV (₹)' : 'Avg Cost Basis ($)'}
+              </label>
               <input
                 type="number"
                 value={avgCostBasis}
                 onChange={(e) => setAvgCostBasis(e.target.value)}
                 placeholder="0.00"
-                step="0.01"
+                step="0.0001"
                 min="0"
                 className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
               />
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">Asset Type</label>
-            <select
-              value={assetType}
-              onChange={(e) => setAssetType(e.target.value)}
-              className="w-full px-4 py-3 bg-input border border-border rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
-            >
-              <option value="STOCK">Stock</option>
-              <option value="ETF">ETF</option>
-              <option value="MUTUAL_FUND">Mutual Fund</option>
-              <option value="BOND">Bond</option>
-              <option value="CRYPTO">Crypto</option>
-              <option value="OPTION">Option</option>
-              <option value="REIT">REIT</option>
-              <option value="OTHER">Other</option>
-            </select>
-          </div>
+
           <div className="flex gap-3 pt-2">
             <button
               onClick={onClose}
@@ -286,7 +449,7 @@ function AddPositionModal({
             </button>
             <button
               onClick={handleCreate}
-              disabled={creating}
+              disabled={creating || (mode === 'mf' && !selectedMF)}
               className="flex-1 px-4 py-2.5 bg-primary text-primary-foreground rounded-xl font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {creating ? 'Adding...' : 'Add Position'}
