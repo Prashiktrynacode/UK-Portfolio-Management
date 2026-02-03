@@ -337,26 +337,52 @@ async function verifyBrokerConnection(
 
 // Trading 212 API verification
 async function verifyTrading212(apiKey: string): Promise<boolean> {
+  // Trading 212 API uses the API key directly in the Authorization header
+  // The endpoint /api/v0/equity/account/cash returns account cash info
+
+  // Try live endpoint first
   try {
-    const response = await fetch('https://live.trading212.com/api/v0/equity/account/info', {
+    console.log('Verifying Trading 212 API key (live endpoint)...');
+    const liveResponse = await fetch('https://live.trading212.com/api/v0/equity/account/cash', {
+      method: 'GET',
       headers: {
         'Authorization': apiKey,
+        'Content-Type': 'application/json',
       },
     });
-    return response.ok;
-  } catch (error) {
-    // Try demo endpoint
-    try {
-      const demoResponse = await fetch('https://demo.trading212.com/api/v0/equity/account/info', {
-        headers: {
-          'Authorization': apiKey,
-        },
-      });
-      return demoResponse.ok;
-    } catch {
-      return false;
+    console.log('Trading 212 live response status:', liveResponse.status);
+    if (liveResponse.ok) {
+      return true;
     }
+    // Log response body for debugging
+    const liveText = await liveResponse.text();
+    console.log('Trading 212 live response:', liveText);
+  } catch (error) {
+    console.log('Trading 212 live endpoint error:', error);
   }
+
+  // Try demo endpoint
+  try {
+    console.log('Verifying Trading 212 API key (demo endpoint)...');
+    const demoResponse = await fetch('https://demo.trading212.com/api/v0/equity/account/cash', {
+      method: 'GET',
+      headers: {
+        'Authorization': apiKey,
+        'Content-Type': 'application/json',
+      },
+    });
+    console.log('Trading 212 demo response status:', demoResponse.status);
+    if (demoResponse.ok) {
+      return true;
+    }
+    // Log response body for debugging
+    const demoText = await demoResponse.text();
+    console.log('Trading 212 demo response:', demoText);
+  } catch (error) {
+    console.log('Trading 212 demo endpoint error:', error);
+  }
+
+  return false;
 }
 
 // Alpaca API verification
@@ -423,21 +449,34 @@ async function fetchBrokerPositions(
 // Fetch Trading 212 positions
 async function fetchTrading212Positions(apiKey: string): Promise<BrokerPosition[]> {
   // Try live first, then demo
+  console.log('Fetching Trading 212 positions (live)...');
   let response = await fetch('https://live.trading212.com/api/v0/equity/portfolio', {
-    headers: { 'Authorization': apiKey },
+    method: 'GET',
+    headers: {
+      'Authorization': apiKey,
+      'Content-Type': 'application/json',
+    },
   });
 
   if (!response.ok) {
+    console.log('Live endpoint failed, trying demo...', response.status);
     response = await fetch('https://demo.trading212.com/api/v0/equity/portfolio', {
-      headers: { 'Authorization': apiKey },
+      method: 'GET',
+      headers: {
+        'Authorization': apiKey,
+        'Content-Type': 'application/json',
+      },
     });
   }
 
   if (!response.ok) {
-    throw new Error('Failed to fetch Trading 212 positions');
+    const errorText = await response.text();
+    console.error('Trading 212 portfolio fetch failed:', response.status, errorText);
+    throw new Error(`Failed to fetch Trading 212 positions: ${response.status}`);
   }
 
   const data = (await response.json()) as any[];
+  console.log(`Fetched ${data.length} positions from Trading 212`);
 
   return data.map((pos: any) => ({
     ticker: pos.ticker,
