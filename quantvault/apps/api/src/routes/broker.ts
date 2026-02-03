@@ -18,58 +18,99 @@ interface SyncBrokerBody {
 export const brokerRoutes: FastifyPluginAsync = async (fastify) => {
   // Get all broker connections for the user
   fastify.get('/', async (request, reply) => {
-    const userId = request.user!.id;
+    try {
+      const userId = request.user!.id;
 
-    const connections = await prisma.brokerConnection.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        broker: true,
-        status: true,
-        lastSyncAt: true,
-        lastSyncStatus: true,
-        accountIds: true,
-        createdAt: true,
-      },
-    });
+      const connections = await prisma.brokerConnection.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          broker: true,
+          status: true,
+          lastSyncAt: true,
+          lastSyncStatus: true,
+          accountIds: true,
+          createdAt: true,
+        },
+      });
 
-    return connections;
+      return connections;
+    } catch (error: any) {
+      console.error('Error fetching broker connections:', error);
+      return reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: error.message || 'Failed to fetch broker connections',
+      });
+    }
   });
 
   // Connect a new broker
   fastify.post<{ Body: ConnectBrokerBody }>('/connect', async (request, reply) => {
-    const userId = request.user!.id;
-    const { broker, apiKey, apiSecret, accountId } = request.body;
+    try {
+      const userId = request.user!.id;
+      const { broker, apiKey, apiSecret, accountId } = request.body;
 
-    // Validate broker type
-    const validBrokers = [
-      'INTERACTIVE_BROKERS',
-      'TRADING_212',
-      'ALPACA',
-      'ROBINHOOD',
-      'CHARLES_SCHWAB',
-      'COINBASE',
-    ];
+      // Validate broker type
+      const validBrokers = [
+        'INTERACTIVE_BROKERS',
+        'TRADING_212',
+        'ALPACA',
+        'ROBINHOOD',
+        'CHARLES_SCHWAB',
+        'COINBASE',
+      ];
 
-    if (!validBrokers.includes(broker)) {
-      return reply.status(400).send({
-        statusCode: 400,
-        error: 'Bad Request',
-        message: `Invalid broker type. Supported: ${validBrokers.join(', ')}`,
+      if (!validBrokers.includes(broker)) {
+        return reply.status(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: `Invalid broker type. Supported: ${validBrokers.join(', ')}`,
+        });
+      }
+
+      // Check if broker is already connected
+      const existing = await prisma.brokerConnection.findFirst({
+        where: { userId, broker: broker as any },
       });
-    }
 
-    // Check if broker is already connected
-    const existing = await prisma.brokerConnection.findFirst({
-      where: { userId, broker: broker as any },
-    });
+      if (existing) {
+        // Update existing connection
+        await prisma.brokerConnection.update({
+          where: { id: existing.id },
+          data: {
+            accessToken: apiKey, // Store API key as accessToken
+            refreshToken: apiSecret || null,
+            accountIds: accountId ? [accountId] : [],
+            status: 'PENDING',
+          },
+        });
 
-    if (existing) {
-      // Update existing connection
-      const updated = await prisma.brokerConnection.update({
-        where: { id: existing.id },
+        // Verify the connection
+        const verified = await verifyBrokerConnection(broker, apiKey, apiSecret);
+
+        await prisma.brokerConnection.update({
+          where: { id: existing.id },
+          data: {
+            status: verified ? 'CONNECTED' : 'ERROR',
+            lastSyncStatus: verified ? 'Connection verified' : 'Invalid API credentials',
+          },
+        });
+
+        return {
+          id: existing.id,
+          broker,
+          status: verified ? 'CONNECTED' : 'ERROR',
+          message: verified ? 'Broker connected successfully' : 'Failed to verify API credentials',
+        };
+      }
+
+      // Create new connection
+      const connection = await prisma.brokerConnection.create({
         data: {
-          accessToken: apiKey, // Store API key as accessToken
+          userId,
+          broker: broker as any,
+          accessToken: apiKey,
           refreshToken: apiSecret || null,
           accountIds: accountId ? [accountId] : [],
           status: 'PENDING',
@@ -80,7 +121,7 @@ export const brokerRoutes: FastifyPluginAsync = async (fastify) => {
       const verified = await verifyBrokerConnection(broker, apiKey, apiSecret);
 
       await prisma.brokerConnection.update({
-        where: { id: existing.id },
+        where: { id: connection.id },
         data: {
           status: verified ? 'CONNECTED' : 'ERROR',
           lastSyncStatus: verified ? 'Connection verified' : 'Invalid API credentials',
@@ -88,42 +129,19 @@ export const brokerRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
       return {
-        id: existing.id,
+        id: connection.id,
         broker,
         status: verified ? 'CONNECTED' : 'ERROR',
         message: verified ? 'Broker connected successfully' : 'Failed to verify API credentials',
       };
+    } catch (error: any) {
+      console.error('Broker connection error:', error);
+      return reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: error.message || 'Failed to connect broker',
+      });
     }
-
-    // Create new connection
-    const connection = await prisma.brokerConnection.create({
-      data: {
-        userId,
-        broker: broker as any,
-        accessToken: apiKey,
-        refreshToken: apiSecret || null,
-        accountIds: accountId ? [accountId] : [],
-        status: 'PENDING',
-      },
-    });
-
-    // Verify the connection
-    const verified = await verifyBrokerConnection(broker, apiKey, apiSecret);
-
-    await prisma.brokerConnection.update({
-      where: { id: connection.id },
-      data: {
-        status: verified ? 'CONNECTED' : 'ERROR',
-        lastSyncStatus: verified ? 'Connection verified' : 'Invalid API credentials',
-      },
-    });
-
-    return {
-      id: connection.id,
-      broker,
-      status: verified ? 'CONNECTED' : 'ERROR',
-      message: verified ? 'Broker connected successfully' : 'Failed to verify API credentials',
-    };
   });
 
   // Sync positions from a broker

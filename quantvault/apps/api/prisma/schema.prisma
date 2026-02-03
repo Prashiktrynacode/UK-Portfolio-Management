@@ -327,6 +327,7 @@ enum BrokerType {
   COINBASE
   KRAKEN
   BINANCE
+  TRADING_212
 }
 
 enum ConnectionStatus {

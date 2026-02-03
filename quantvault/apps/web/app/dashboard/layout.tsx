@@ -17,6 +17,7 @@ import {
   Plus,
   ChevronDown,
   Check,
+  Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -98,6 +99,31 @@ export default function DashboardLayout({
 
   const openCreateModal = () => setShowCreateModal(true);
 
+  const handleDeletePortfolio = async (portfolio: Portfolio) => {
+    if (!confirm(`Are you sure you want to delete "${portfolio.name}"? This will permanently delete all positions and transactions in this portfolio.`)) {
+      return;
+    }
+
+    try {
+      await api.portfolios.delete(portfolio.id);
+      toast.success('Portfolio deleted successfully');
+
+      // Remove from local state
+      const updatedPortfolios = portfolios.filter(p => p.id !== portfolio.id);
+      setPortfolios(updatedPortfolios);
+
+      // If deleted portfolio was selected, switch to another
+      if (selectedPortfolio?.id === portfolio.id) {
+        setSelectedPortfolio(updatedPortfolios.length > 0 ? updatedPortfolios[0] : null);
+      }
+
+      setShowPortfolioDropdown(false);
+    } catch (error: any) {
+      console.error('Delete portfolio error:', error);
+      toast.error(error.message || 'Failed to delete portfolio');
+    }
+  };
+
   const handlePortfolioCreated = (newPortfolio: Portfolio) => {
     setPortfolios(prev => [...prev, newPortfolio]);
     setSelectedPortfolio(newPortfolio);
@@ -162,22 +188,38 @@ export default function DashboardLayout({
                   {showPortfolioDropdown && (
                     <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
                       {portfolios.map((portfolio) => (
-                        <button
+                        <div
                           key={portfolio.id}
-                          onClick={() => {
-                            setSelectedPortfolio(portfolio);
-                            setShowPortfolioDropdown(false);
-                          }}
                           className={cn(
-                            "w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary/50 transition-colors",
+                            "flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary/50 transition-colors group",
                             selectedPortfolio?.id === portfolio.id && "bg-primary/10 text-primary"
                           )}
                         >
-                          <span className="truncate">{portfolio.name}</span>
-                          {selectedPortfolio?.id === portfolio.id && (
-                            <Check className="size-4" />
-                          )}
-                        </button>
+                          <button
+                            onClick={() => {
+                              setSelectedPortfolio(portfolio);
+                              setShowPortfolioDropdown(false);
+                            }}
+                            className="flex-1 text-left truncate"
+                          >
+                            {portfolio.name}
+                          </button>
+                          <div className="flex items-center gap-1">
+                            {selectedPortfolio?.id === portfolio.id && (
+                              <Check className="size-4" />
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeletePortfolio(portfolio);
+                              }}
+                              className="p-1 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 rounded transition-all"
+                              title="Delete portfolio"
+                            >
+                              <Trash2 className="size-3.5 text-red-500" />
+                            </button>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   )}
