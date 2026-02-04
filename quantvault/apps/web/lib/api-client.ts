@@ -88,7 +88,8 @@ async function apiFetch<T>(
 
   if (!response.ok) {
     const error = data as ApiError;
-    throw new Error(error.message || 'API request failed');
+    console.error('API Error:', { status: response.status, url, error: data });
+    throw new Error(error.message || `API request failed: ${response.status}`);
   }
 
   return data as T;

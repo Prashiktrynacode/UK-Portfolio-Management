@@ -38,6 +38,7 @@ export default function Dashboard() {
       toast.success('Portfolio refreshed!');
     } catch (error: any) {
       console.error('Refresh error:', error);
+      toast.error(error.message || 'Failed to refresh prices');
       // Still fetch positions even if refresh fails
       await fetchPositions();
     } finally {
