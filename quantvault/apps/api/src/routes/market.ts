@@ -138,7 +138,7 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
         throw new Error(`Failed to search mutual funds: ${response.status}`);
       }
 
-      const data = await response.json();
+      const data = await response.json() as any;
       console.log(`MF search returned ${Array.isArray(data) ? data.length : 'non-array'} results`);
 
       // Handle both array and object responses
