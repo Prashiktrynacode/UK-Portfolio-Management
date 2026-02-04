@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Upload, FileSpreadsheet, Plus, Loader2, X, Check, AlertCircle, Link2, ExternalLink, Key, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePortfolio } from '../layout';
-import { api, BrokerConnection } from '@/lib/api-client';
+import { api, BrokerConnection, Trading212ParseResult, Trading212AggregatedPosition } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
 export default function ImportPage() {
@@ -14,7 +14,9 @@ export default function ImportPage() {
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvPreview, setCsvPreview] = useState<any>(null);
+  const [trading212Preview, setTrading212Preview] = useState<Trading212ParseResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [importMode, setImportMode] = useState<'generic' | 'trading212'>('trading212');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -30,9 +32,19 @@ export default function ImportPage() {
     setIsProcessing(true);
 
     try {
-      const result = await api.import.parseCSV(file);
-      setCsvPreview(result);
-      toast.success(`Parsed ${result.rowCount} rows from ${file.name}`);
+      if (importMode === 'trading212') {
+        // Use Trading 212 parser that aggregates positions
+        const result = await api.import.parseTrading212CSV(file);
+        setTrading212Preview(result);
+        setCsvPreview(null);
+        toast.success(`Found ${result.positions.length} positions with holdings (${result.summary.positionsFullySold} fully sold)`);
+      } else {
+        // Use generic CSV parser
+        const result = await api.import.parseCSV(file);
+        setCsvPreview(result);
+        setTrading212Preview(null);
+        toast.success(`Parsed ${result.rowCount} rows from ${file.name}`);
+      }
     } catch (error: any) {
       toast.error(error.message || 'Failed to parse CSV file');
       setCsvFile(null);
@@ -60,6 +72,7 @@ export default function ImportPage() {
   const clearFile = () => {
     setCsvFile(null);
     setCsvPreview(null);
+    setTrading212Preview(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -103,11 +116,37 @@ export default function ImportPage() {
             </div>
             <div>
               <h3 className="font-semibold">Import from CSV</h3>
-              <p className="text-sm text-muted-foreground">Upload a spreadsheet with your holdings</p>
+              <p className="text-sm text-muted-foreground">Upload your transaction history</p>
             </div>
           </div>
 
-          {csvFile && csvPreview ? (
+          {/* Import Mode Toggle */}
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => { setImportMode('trading212'); clearFile(); }}
+              className={cn(
+                "flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                importMode === 'trading212'
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+              )}
+            >
+              Trading 212
+            </button>
+            <button
+              onClick={() => { setImportMode('generic'); clearFile(); }}
+              className={cn(
+                "flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                importMode === 'generic'
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+              )}
+            >
+              Generic CSV
+            </button>
+          </div>
+
+          {csvFile && (trading212Preview || csvPreview) ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
                 <div className="flex items-center gap-2">
@@ -122,24 +161,37 @@ export default function ImportPage() {
                 </button>
               </div>
 
-              <div className="text-sm">
-                <p className="text-muted-foreground mb-2">
-                  Found <span className="font-medium text-foreground">{csvPreview.rowCount}</span> rows
-                </p>
-                <p className="text-muted-foreground">
-                  Columns: {csvPreview.headers.slice(0, 5).join(', ')}
-                  {csvPreview.headers.length > 5 && ` +${csvPreview.headers.length - 5} more`}
-                </p>
-              </div>
+              {trading212Preview ? (
+                <Trading212ImportWizard
+                  portfolioId={selectedPortfolio.id}
+                  preview={trading212Preview}
+                  onComplete={() => {
+                    clearFile();
+                    router.push('/dashboard/portfolio');
+                  }}
+                />
+              ) : csvPreview ? (
+                <>
+                  <div className="text-sm">
+                    <p className="text-muted-foreground mb-2">
+                      Found <span className="font-medium text-foreground">{csvPreview.rowCount}</span> rows
+                    </p>
+                    <p className="text-muted-foreground">
+                      Columns: {csvPreview.headers.slice(0, 5).join(', ')}
+                      {csvPreview.headers.length > 5 && ` +${csvPreview.headers.length - 5} more`}
+                    </p>
+                  </div>
 
-              <CSVImportWizard
-                portfolioId={selectedPortfolio.id}
-                preview={csvPreview}
-                onComplete={() => {
-                  clearFile();
-                  router.push('/dashboard/portfolio');
-                }}
-              />
+                  <CSVImportWizard
+                    portfolioId={selectedPortfolio.id}
+                    preview={csvPreview}
+                    onComplete={() => {
+                      clearFile();
+                      router.push('/dashboard/portfolio');
+                    }}
+                  />
+                </>
+              ) : null}
             </div>
           ) : (
             <div
@@ -160,7 +212,10 @@ export default function ImportPage() {
                 {isProcessing ? 'Processing...' : 'Drag and drop your CSV file here, or click to browse'}
               </p>
               <p className="text-xs text-muted-foreground">
-                Supports Fidelity, Schwab, Robinhood, and custom formats
+                {importMode === 'trading212'
+                  ? 'Upload your Trading 212 transaction history export'
+                  : 'Supports Fidelity, Schwab, Robinhood, and custom formats'
+                }
               </p>
               <input
                 ref={fileInputRef}
@@ -794,6 +849,151 @@ function ManualEntryForm({
           {isSubmitting ? 'Importing...' : 'Import All'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function Trading212ImportWizard({
+  portfolioId,
+  preview,
+  onComplete
+}: {
+  portfolioId: string;
+  preview: Trading212ParseResult;
+  onComplete: () => void;
+}) {
+  const [selectedPositions, setSelectedPositions] = useState<Set<string>>(
+    new Set(preview.positions.map(p => p.ticker))
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const togglePosition = (ticker: string) => {
+    const newSelected = new Set(selectedPositions);
+    if (newSelected.has(ticker)) {
+      newSelected.delete(ticker);
+    } else {
+      newSelected.add(ticker);
+    }
+    setSelectedPositions(newSelected);
+  };
+
+  const toggleAll = () => {
+    if (selectedPositions.size === preview.positions.length) {
+      setSelectedPositions(new Set());
+    } else {
+      setSelectedPositions(new Set(preview.positions.map(p => p.ticker)));
+    }
+  };
+
+  const handleImport = async () => {
+    const positionsToImport = preview.positions.filter(p => selectedPositions.has(p.ticker));
+
+    if (positionsToImport.length === 0) {
+      toast.error('Please select at least one position to import');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const result = await api.import.importTrading212({
+        portfolioId,
+        positions: positionsToImport,
+      });
+
+      if (result.failed > 0) {
+        toast.warning(`Imported ${result.success} positions, ${result.failed} failed`);
+      } else {
+        toast.success(`Successfully imported ${result.success} positions`);
+      }
+      onComplete();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to import positions');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const formatCurrency = (value: number, currency: string) => {
+    const symbols: Record<string, string> = { GBP: '£', USD: '$', EUR: '€', INR: '₹' };
+    return `${symbols[currency] || currency + ' '}${value.toFixed(2)}`;
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="bg-secondary/30 rounded-lg p-3">
+          <p className="text-muted-foreground">Total Buys</p>
+          <p className="font-semibold text-green-500">{preview.summary.totalBuys}</p>
+        </div>
+        <div className="bg-secondary/30 rounded-lg p-3">
+          <p className="text-muted-foreground">Total Sells</p>
+          <p className="font-semibold text-red-500">{preview.summary.totalSells}</p>
+        </div>
+        <div className="bg-secondary/30 rounded-lg p-3">
+          <p className="text-muted-foreground">Current Holdings</p>
+          <p className="font-semibold">{preview.summary.positionsWithHoldings}</p>
+        </div>
+        <div className="bg-secondary/30 rounded-lg p-3">
+          <p className="text-muted-foreground">Fully Sold</p>
+          <p className="font-semibold text-muted-foreground">{preview.summary.positionsFullySold}</p>
+        </div>
+      </div>
+
+      {/* Position Selection */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium">
+            Positions to Import ({selectedPositions.size}/{preview.positions.length})
+          </label>
+          <button
+            onClick={toggleAll}
+            className="text-xs text-primary hover:underline"
+          >
+            {selectedPositions.size === preview.positions.length ? 'Deselect All' : 'Select All'}
+          </button>
+        </div>
+
+        <div className="max-h-64 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+          {preview.positions.map((pos) => (
+            <label
+              key={pos.ticker}
+              className="flex items-center gap-3 p-3 hover:bg-secondary/30 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={selectedPositions.has(pos.ticker)}
+                onChange={() => togglePosition(pos.ticker)}
+                className="size-4 rounded border-border"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{pos.ticker}</span>
+                  <span className="text-xs text-muted-foreground truncate">{pos.name}</span>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+                  <span>{pos.totalShares.toFixed(4)} shares</span>
+                  <span>Avg: {formatCurrency(pos.avgCostBasis, pos.currency)}</span>
+                  <span>Total: {formatCurrency(pos.totalCost, pos.currency)}</span>
+                </div>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-xs text-yellow-600 dark:text-yellow-400">
+        <p className="font-medium mb-1">Note:</p>
+        <p>This will calculate your current positions by aggregating all buys and sells. Deposits, withdrawals, dividends, and interest are ignored.</p>
+      </div>
+
+      <button
+        onClick={handleImport}
+        disabled={isSubmitting || selectedPositions.size === 0}
+        className="w-full px-4 py-2.5 bg-primary text-primary-foreground rounded-lg font-medium disabled:opacity-50"
+      >
+        {isSubmitting ? 'Importing...' : `Import ${selectedPositions.size} Positions`}
+      </button>
     </div>
   );
 }

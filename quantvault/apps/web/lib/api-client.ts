@@ -233,8 +233,34 @@ export const api = {
       }),
     
     getHistory: () => apiFetch<ImportHistoryItem[]>('/import/history'),
-    
+
     getTemplates: () => apiFetch<{ templates: CSVTemplate[] }>('/import/templates'),
+
+    // Trading 212 specific import
+    parseTrading212CSV: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const token = await getAuthToken();
+      const response = await fetch(`${API_BASE_URL}/import/parse-trading212`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message);
+      }
+
+      return response.json() as Promise<Trading212ParseResult>;
+    },
+
+    importTrading212: (data: Trading212ImportInput) =>
+      apiFetch<ImportResult>('/import/trading212', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
 
   // Market data endpoints
@@ -749,6 +775,41 @@ export interface MutualFundHistory {
   schemeType: string;
   schemeCategory: string;
   data: { date: string; nav: number }[];
+}
+
+// Trading 212 Import types
+export interface Trading212AggregatedPosition {
+  ticker: string;
+  name: string;
+  totalShares: number;
+  totalCost: number;
+  avgCostBasis: number;
+  currency: string;
+  firstPurchaseDate: string;
+  transactions: Array<{
+    type: 'BUY' | 'SELL';
+    shares: number;
+    price: number;
+    date: string;
+    total: number;
+  }>;
+}
+
+export interface Trading212ParseResult {
+  filename: string;
+  positions: Trading212AggregatedPosition[];
+  summary: {
+    totalBuys: number;
+    totalSells: number;
+    ignoredTransactions: number;
+    positionsWithHoldings: number;
+    positionsFullySold: number;
+  };
+}
+
+export interface Trading212ImportInput {
+  portfolioId: string;
+  positions: Trading212AggregatedPosition[];
 }
 
 // Fees tracking types

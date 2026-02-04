@@ -232,3 +232,220 @@ export function generateTemplate(): string {
 
   return [headers.join(','), ...sampleRows.map(r => r.join(','))].join('\n');
 }
+
+/**
+ * Trading 212 specific transaction types
+ */
+const TRADING_212_BUY_ACTIONS = ['market buy', 'limit buy'];
+const TRADING_212_SELL_ACTIONS = ['market sell', 'limit sell'];
+const TRADING_212_IGNORE_ACTIONS = [
+  'interest on cash',
+  'dividend',
+  'deposit',
+  'withdrawal',
+  'dividend (dividends paid by issuers)',
+  'dividend (ordinary)',
+  'currency conversion',
+  'new card cost',
+  'lending interest',
+];
+
+export interface Trading212Transaction {
+  action: string;
+  time: string;
+  isin: string;
+  ticker: string;
+  name: string;
+  shares: number;
+  pricePerShare: number;
+  currency: string;
+  exchangeRate: number;
+  total: number;
+  resultCurrency: string;
+}
+
+export interface AggregatedPosition {
+  ticker: string;
+  name: string;
+  totalShares: number;
+  totalCost: number;
+  avgCostBasis: number;
+  currency: string;
+  firstPurchaseDate: string;
+  transactions: Array<{
+    type: 'BUY' | 'SELL';
+    shares: number;
+    price: number;
+    date: string;
+    total: number;
+  }>;
+}
+
+/**
+ * Parse Trading 212 CSV export and aggregate into current positions
+ */
+export function parseTrading212CSV(content: string): {
+  positions: AggregatedPosition[];
+  summary: {
+    totalBuys: number;
+    totalSells: number;
+    ignoredTransactions: number;
+    positionsWithHoldings: number;
+    positionsFullySold: number;
+  };
+} {
+  const { headers, rows } = parseCSV(content);
+
+  // Normalize headers to lowercase for matching
+  const normalizedHeaders = headers.map(h => h.toLowerCase().trim());
+
+  // Find column indices - handle Trading 212 specific column names
+  const actionIdx = normalizedHeaders.findIndex(h => h === 'action');
+  const timeIdx = normalizedHeaders.findIndex(h => h === 'time');
+  const isinIdx = normalizedHeaders.findIndex(h => h === 'isin');
+  const tickerIdx = normalizedHeaders.findIndex(h => h === 'ticker');
+  const nameIdx = normalizedHeaders.findIndex(h => h === 'name');
+  const sharesIdx = normalizedHeaders.findIndex(h => h.includes('no. of shares') || h.includes('shares'));
+  const priceIdx = normalizedHeaders.findIndex(h => h.includes('price / share') || h === 'price');
+  const currencyPriceIdx = normalizedHeaders.findIndex(h => h.includes('currency (price'));
+  const exchangeRateIdx = normalizedHeaders.findIndex(h => h.includes('exchange rate'));
+  const totalIdx = normalizedHeaders.findIndex(h => h.includes('total') && !h.includes('currency'));
+  const resultCurrencyIdx = normalizedHeaders.findIndex(h => h.includes('currency (result') || h.includes('result'));
+
+  if (actionIdx === -1 || tickerIdx === -1) {
+    throw new Error('Could not find required columns (Action, Ticker) in Trading 212 CSV');
+  }
+
+  // Parse transactions
+  const transactions: Trading212Transaction[] = [];
+  let totalBuys = 0;
+  let totalSells = 0;
+  let ignoredTransactions = 0;
+
+  for (const row of rows) {
+    const values = Object.values(row);
+    const action = (values[actionIdx] || '').toString().toLowerCase().trim();
+
+    // Check if this is a buy or sell transaction
+    const isBuy = TRADING_212_BUY_ACTIONS.some(a => action.includes(a));
+    const isSell = TRADING_212_SELL_ACTIONS.some(a => action.includes(a));
+
+    if (!isBuy && !isSell) {
+      // Check if it's a known ignore action or just skip
+      const isIgnored = TRADING_212_IGNORE_ACTIONS.some(a => action.includes(a));
+      if (isIgnored || action) {
+        ignoredTransactions++;
+      }
+      continue;
+    }
+
+    const ticker = (values[tickerIdx] || '').toString().trim();
+    if (!ticker) continue;
+
+    const shares = parseFloat((values[sharesIdx] || '0').toString().replace(/[^0-9.-]/g, '')) || 0;
+    const pricePerShare = parseFloat((values[priceIdx] || '0').toString().replace(/[^0-9.-]/g, '')) || 0;
+    const total = parseFloat((values[totalIdx] || '0').toString().replace(/[^0-9.-]/g, '')) || 0;
+
+    if (shares === 0) continue;
+
+    if (isBuy) totalBuys++;
+    if (isSell) totalSells++;
+
+    transactions.push({
+      action: isBuy ? 'BUY' : 'SELL',
+      time: (values[timeIdx] || '').toString().trim(),
+      isin: isinIdx >= 0 ? (values[isinIdx] || '').toString().trim() : '',
+      ticker,
+      name: nameIdx >= 0 ? (values[nameIdx] || '').toString().trim() : ticker,
+      shares: isBuy ? shares : -shares, // Negative for sells
+      pricePerShare,
+      currency: currencyPriceIdx >= 0 ? (values[currencyPriceIdx] || 'GBP').toString().trim() : 'GBP',
+      exchangeRate: exchangeRateIdx >= 0 ? parseFloat((values[exchangeRateIdx] || '1').toString()) || 1 : 1,
+      total: isBuy ? total : -total, // Negative for sells
+      resultCurrency: resultCurrencyIdx >= 0 ? (values[resultCurrencyIdx] || 'GBP').toString().trim() : 'GBP',
+    });
+  }
+
+  // Aggregate transactions by ticker
+  const positionMap = new Map<string, AggregatedPosition>();
+
+  for (const tx of transactions) {
+    let position = positionMap.get(tx.ticker);
+
+    if (!position) {
+      position = {
+        ticker: tx.ticker,
+        name: tx.name,
+        totalShares: 0,
+        totalCost: 0,
+        avgCostBasis: 0,
+        currency: tx.currency,
+        firstPurchaseDate: tx.time,
+        transactions: [],
+      };
+      positionMap.set(tx.ticker, position);
+    }
+
+    // Track transaction
+    position.transactions.push({
+      type: tx.shares > 0 ? 'BUY' : 'SELL',
+      shares: Math.abs(tx.shares),
+      price: tx.pricePerShare,
+      date: tx.time,
+      total: Math.abs(tx.total),
+    });
+
+    // For cost basis calculation, we use FIFO-like approach
+    if (tx.shares > 0) {
+      // Buy: add to total cost
+      position.totalCost += tx.shares * tx.pricePerShare;
+      position.totalShares += tx.shares;
+    } else {
+      // Sell: reduce shares but proportionally reduce cost basis
+      const sellShares = Math.abs(tx.shares);
+      if (position.totalShares > 0) {
+        const proportionSold = sellShares / position.totalShares;
+        position.totalCost -= position.totalCost * proportionSold;
+      }
+      position.totalShares += tx.shares; // tx.shares is negative for sells
+    }
+
+    // Update first purchase date if this is earlier
+    if (tx.shares > 0 && new Date(tx.time) < new Date(position.firstPurchaseDate)) {
+      position.firstPurchaseDate = tx.time;
+    }
+  }
+
+  // Calculate final avg cost basis and filter out fully sold positions
+  const positions: AggregatedPosition[] = [];
+  let positionsFullySold = 0;
+
+  for (const position of positionMap.values()) {
+    // Round to avoid floating point issues
+    position.totalShares = Math.round(position.totalShares * 10000) / 10000;
+
+    if (position.totalShares <= 0.0001) {
+      // Position fully sold
+      positionsFullySold++;
+      continue;
+    }
+
+    // Calculate avg cost basis per share
+    position.avgCostBasis = position.totalCost / position.totalShares;
+    positions.push(position);
+  }
+
+  // Sort by ticker
+  positions.sort((a, b) => a.ticker.localeCompare(b.ticker));
+
+  return {
+    positions,
+    summary: {
+      totalBuys,
+      totalSells,
+      ignoredTransactions,
+      positionsWithHoldings: positions.length,
+      positionsFullySold,
+    },
+  };
+}

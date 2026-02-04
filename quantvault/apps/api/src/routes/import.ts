@@ -5,7 +5,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import multipart from '@fastify/multipart';
 import { prisma } from '../server';
 import { Decimal } from '@prisma/client/runtime/library';
-import { parseCSV, validateColumnMapping, ColumnMapping } from '../utils/csv-parser';
+import { parseCSV, validateColumnMapping, ColumnMapping, parseTrading212CSV, AggregatedPosition } from '../utils/csv-parser';
 
 interface ImportBody {
   portfolioId: string;
@@ -23,6 +23,11 @@ interface ManualEntryBody {
     assetType?: string;
     accountTag?: string;
   }>;
+}
+
+interface Trading212ImportBody {
+  portfolioId: string;
+  positions: AggregatedPosition[];
 }
 
 export async function importRoutes(fastify: FastifyInstance) {
@@ -351,6 +356,234 @@ export async function importRoutes(fastify: FastifyInstance) {
       });
 
       return history;
+    }
+  );
+
+  // Parse Trading 212 CSV and aggregate into positions
+  fastify.post(
+    '/parse-trading212',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const userId = request.user!.id;
+
+      const file = await request.file();
+      if (!file) {
+        return reply.status(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: 'No file uploaded',
+        });
+      }
+
+      // Validate file type
+      const allowedTypes = ['text/csv', 'application/vnd.ms-excel'];
+      if (!allowedTypes.includes(file.mimetype) && !file.filename.endsWith('.csv')) {
+        return reply.status(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: 'File must be a CSV',
+        });
+      }
+
+      try {
+        // Read and parse file
+        const buffer = await file.toBuffer();
+        const content = buffer.toString('utf-8');
+        const result = parseTrading212CSV(content);
+
+        return {
+          filename: file.filename,
+          positions: result.positions,
+          summary: result.summary,
+        };
+      } catch (err: any) {
+        console.error('Trading 212 parse error:', err);
+        return reply.status(400).send({
+          statusCode: 400,
+          error: 'Parse Error',
+          message: err.message || 'Failed to parse Trading 212 CSV file',
+        });
+      }
+    }
+  );
+
+  // Import Trading 212 aggregated positions
+  fastify.post<{ Body: Trading212ImportBody }>(
+    '/trading212',
+    async (request, reply) => {
+      const userId = request.user!.id;
+      const { portfolioId, positions } = request.body;
+
+      // Verify portfolio ownership
+      const portfolio = await prisma.portfolio.findFirst({
+        where: { id: portfolioId, userId },
+      });
+
+      if (!portfolio) {
+        return reply.status(404).send({
+          statusCode: 404,
+          error: 'Not Found',
+          message: 'Portfolio not found',
+        });
+      }
+
+      if (!positions || positions.length === 0) {
+        return reply.status(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: 'No positions to import',
+        });
+      }
+
+      // Create import history record
+      const importRecord = await prisma.importHistory.create({
+        data: {
+          userId,
+          source: 'trading212',
+          sourceName: 'Trading 212 CSV',
+          status: 'PROCESSING',
+          recordsTotal: positions.length,
+        },
+      });
+
+      // Process positions
+      const results = {
+        success: 0,
+        failed: 0,
+        errors: [] as Array<{ ticker: string; error: string }>,
+        created: [] as string[],
+        updated: [] as string[],
+      };
+
+      for (const pos of positions) {
+        try {
+          const ticker = pos.ticker.toUpperCase().trim();
+
+          if (!ticker || pos.totalShares <= 0) {
+            continue;
+          }
+
+          // Determine currency
+          const currency = pos.currency || 'GBP';
+
+          // Check if position exists
+          const existingPosition = await prisma.position.findFirst({
+            where: { portfolioId, ticker },
+          });
+
+          if (existingPosition) {
+            // Update existing position - merge with new data
+            const newTotalQty = Number(existingPosition.quantity) + pos.totalShares;
+            const currentTotalCost = Number(existingPosition.quantity) * Number(existingPosition.avgCostBasis);
+            const newTotalCost = currentTotalCost + pos.totalCost;
+            const newAvgCost = newTotalCost / newTotalQty;
+
+            await prisma.position.update({
+              where: { id: existingPosition.id },
+              data: {
+                quantity: new Decimal(newTotalQty),
+                avgCostBasis: new Decimal(newAvgCost),
+                currency,
+              },
+            });
+
+            // Add tax lots for each buy transaction
+            for (const tx of pos.transactions.filter(t => t.type === 'BUY')) {
+              await prisma.taxLot.create({
+                data: {
+                  positionId: existingPosition.id,
+                  quantity: new Decimal(tx.shares),
+                  costBasis: new Decimal(tx.price),
+                  purchaseDate: tx.date ? new Date(tx.date) : new Date(),
+                },
+              });
+            }
+
+            // Add all transactions
+            for (const tx of pos.transactions) {
+              await prisma.transaction.create({
+                data: {
+                  positionId: existingPosition.id,
+                  type: tx.type,
+                  quantity: new Decimal(tx.shares),
+                  price: new Decimal(tx.price),
+                  totalAmount: new Decimal(tx.total),
+                  executedAt: tx.date ? new Date(tx.date) : new Date(),
+                  source: 'trading212',
+                },
+              });
+            }
+
+            results.updated.push(ticker);
+          } else {
+            // Create new position
+            const position = await prisma.position.create({
+              data: {
+                portfolioId,
+                ticker,
+                assetType: 'STOCK',
+                quantity: new Decimal(pos.totalShares),
+                avgCostBasis: new Decimal(pos.avgCostBasis),
+                currency,
+              },
+            });
+
+            // Add tax lots for each buy transaction
+            for (const tx of pos.transactions.filter(t => t.type === 'BUY')) {
+              await prisma.taxLot.create({
+                data: {
+                  positionId: position.id,
+                  quantity: new Decimal(tx.shares),
+                  costBasis: new Decimal(tx.price),
+                  purchaseDate: tx.date ? new Date(tx.date) : new Date(),
+                },
+              });
+            }
+
+            // Add all transactions
+            for (const tx of pos.transactions) {
+              await prisma.transaction.create({
+                data: {
+                  positionId: position.id,
+                  type: tx.type,
+                  quantity: new Decimal(tx.shares),
+                  price: new Decimal(tx.price),
+                  totalAmount: new Decimal(tx.total),
+                  executedAt: tx.date ? new Date(tx.date) : new Date(),
+                  source: 'trading212',
+                },
+              });
+            }
+
+            results.created.push(ticker);
+          }
+
+          results.success++;
+        } catch (err: any) {
+          console.error(`Failed to import ${pos.ticker}:`, err);
+          results.failed++;
+          results.errors.push({
+            ticker: pos.ticker,
+            error: err.message,
+          });
+        }
+      }
+
+      // Update import record
+      await prisma.importHistory.update({
+        where: { id: importRecord.id },
+        data: {
+          status: results.failed > 0 ? 'COMPLETED_WITH_WARNINGS' : 'COMPLETED',
+          recordsSuccess: results.success,
+          recordsFailed: results.failed,
+          errors: results.errors.length > 0 ? results.errors : undefined,
+          completedAt: new Date(),
+        },
+      });
+
+      return {
+        importId: importRecord.id,
+        ...results,
+      };
     }
   );
 
