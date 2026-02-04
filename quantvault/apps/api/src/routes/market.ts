@@ -93,11 +93,23 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/refresh/:portfolioId', async (request, reply) => {
     const { portfolioId } = request.params;
 
+    console.log(`Received refresh request for portfolio: ${portfolioId}`);
+
+    if (!portfolioId) {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Portfolio ID is required',
+      });
+    }
+
     try {
       await updatePortfolioMarketData(portfolioId);
+      console.log(`Successfully refreshed market data for portfolio: ${portfolioId}`);
       return { success: true, message: 'Portfolio market data refreshed' };
     } catch (error: any) {
       console.error('Error refreshing portfolio market data:', error);
+      console.error('Error stack:', error.stack);
       return reply.status(500).send({
         statusCode: 500,
         error: 'Internal Server Error',

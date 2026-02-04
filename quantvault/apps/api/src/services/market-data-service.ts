@@ -399,66 +399,96 @@ export async function updatePositionMarketData(positionId: string): Promise<void
  * Update all positions in a portfolio with latest market data
  */
 export async function updatePortfolioMarketData(portfolioId: string): Promise<void> {
+  console.log(`Refreshing market data for portfolio: ${portfolioId}`);
+
   const positions = await prisma.position.findMany({
     where: { portfolioId },
   });
 
+  console.log(`Found ${positions.length} positions to update`);
+
+  if (positions.length === 0) {
+    console.log('No positions to update');
+    return;
+  }
+
   // Get unique tickers
   const tickers = [...new Set(positions.map(p => p.ticker))];
+  console.log(`Fetching quotes for tickers: ${tickers.join(', ')}`);
 
   // Fetch all quotes
   const quotes = await getQuotes(tickers);
+  console.log(`Successfully fetched ${quotes.size} quotes`);
 
   // Update each position
   let totalValue = 0;
   let totalCost = 0;
   let totalDayChange = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
 
   for (const position of positions) {
     const quote = quotes.get(position.ticker.toUpperCase());
-    if (!quote) continue;
+    if (!quote) {
+      console.log(`No quote found for ${position.ticker}, skipping`);
+      skippedCount++;
+      continue;
+    }
 
-    const quantity = Number(position.quantity);
-    const avgCostBasis = Number(position.avgCostBasis);
-    const currentPrice = quote.price;
-    const marketValue = quantity * currentPrice;
-    const positionCost = quantity * avgCostBasis;
-    const unrealizedPL = marketValue - positionCost;
-    const unrealizedPLPercent = positionCost > 0 ? (unrealizedPL / positionCost) * 100 : 0;
-    const dayChange = quantity * quote.change;
+    try {
+      const quantity = Number(position.quantity);
+      const avgCostBasis = Number(position.avgCostBasis);
+      const currentPrice = quote.price;
+      const marketValue = quantity * currentPrice;
+      const positionCost = quantity * avgCostBasis;
+      const unrealizedPL = marketValue - positionCost;
+      const unrealizedPLPercent = positionCost > 0 ? (unrealizedPL / positionCost) * 100 : 0;
+      const dayChange = quantity * quote.change;
 
-    await prisma.position.update({
-      where: { id: position.id },
-      data: {
-        currentPrice: currentPrice,
-        dayChange: quote.change,
-        dayChangePercent: quote.changePercent,
-        marketValue: marketValue,
-        unrealizedPL: unrealizedPL,
-        unrealizedPLPercent: unrealizedPLPercent,
-        name: quote.name || position.name,
-        sector: quote.sector || position.sector,
-        exchange: quote.exchange || position.exchange,
-      },
-    });
+      await prisma.position.update({
+        where: { id: position.id },
+        data: {
+          currentPrice: currentPrice,
+          dayChange: quote.change,
+          dayChangePercent: quote.changePercent,
+          marketValue: marketValue,
+          unrealizedPL: unrealizedPL,
+          unrealizedPLPercent: unrealizedPLPercent,
+          name: quote.name || position.name,
+          sector: quote.sector || position.sector,
+          exchange: quote.exchange || position.exchange,
+        },
+      });
 
-    totalValue += marketValue;
-    totalCost += positionCost;
-    totalDayChange += dayChange;
+      totalValue += marketValue;
+      totalCost += positionCost;
+      totalDayChange += dayChange;
+      updatedCount++;
+    } catch (err: any) {
+      console.error(`Failed to update position ${position.ticker}:`, err.message);
+      skippedCount++;
+    }
   }
+
+  console.log(`Updated ${updatedCount} positions, skipped ${skippedCount}`);
 
   // Update portfolio totals
   const dayChangePercent = totalValue > 0 ? (totalDayChange / totalValue) * 100 : 0;
 
-  await prisma.portfolio.update({
-    where: { id: portfolioId },
-    data: {
-      totalValue: totalValue,
-      totalCost: totalCost,
-      dayChange: totalDayChange,
-      dayChangePercent: dayChangePercent,
-    },
-  });
+  try {
+    await prisma.portfolio.update({
+      where: { id: portfolioId },
+      data: {
+        totalValue: totalValue,
+        totalCost: totalCost,
+        dayChange: totalDayChange,
+        dayChangePercent: dayChangePercent,
+      },
+    });
+    console.log(`Portfolio totals updated: value=${totalValue}, cost=${totalCost}`);
+  } catch (err: any) {
+    console.error(`Failed to update portfolio totals:`, err.message);
+  }
 }
 
 /**
