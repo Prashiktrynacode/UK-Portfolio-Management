@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { PieChart, Plus, TrendingUp, TrendingDown, Loader2, Trash2, Search } from 'lucide-react';
+import { PieChart, Plus, TrendingUp, TrendingDown, Loader2, Trash2, Search, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePortfolio } from '../layout';
 import { api, Position, PositionWithMeta, MutualFundSearchResult, MutualFundNAV } from '@/lib/api-client';
@@ -25,6 +25,7 @@ export default function PortfolioPage() {
   const { selectedPortfolio, isLoading: portfolioLoading, openCreateModal } = usePortfolio();
   const [positions, setPositions] = useState<PositionWithMeta[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
 
   const fetchPositions = async () => {
@@ -68,6 +69,22 @@ export default function PortfolioPage() {
     }
   };
 
+  const handleRefreshPrices = async () => {
+    if (!selectedPortfolio) return;
+
+    setIsRefreshing(true);
+    try {
+      await api.market.refreshPortfolio(selectedPortfolio.id);
+      toast.success('Prices refreshed!');
+      await fetchPositions();
+    } catch (error: any) {
+      console.error('Refresh prices error:', error);
+      toast.error(error.message || 'Failed to refresh prices');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   if (portfolioLoading) {
     return (
       <div className="flex items-center justify-center h-[50vh]">
@@ -104,13 +121,23 @@ export default function PortfolioPage() {
           <h1 className="text-2xl font-bold">{selectedPortfolio.name}</h1>
           <p className="text-muted-foreground">Manage your holdings and positions</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
-        >
-          <Plus className="size-4" />
-          Add Position
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefreshPrices}
+            disabled={isRefreshing}
+            className="flex items-center gap-2 px-4 py-2 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/80 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={cn("size-4", isRefreshing && "animate-spin")} />
+            Refresh
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
+          >
+            <Plus className="size-4" />
+            Add Position
+          </button>
+        </div>
       </div>
 
       {isLoading ? (

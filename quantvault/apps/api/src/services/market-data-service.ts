@@ -69,57 +69,89 @@ const quoteCache = new Map<string, { data: QuoteResult; timestamp: number }>();
 
 /**
  * Fetch quote from Yahoo Finance API
+ * Automatically handles UK stocks (LSE) by appending .L suffix if needed
  */
 async function fetchYahooQuote(ticker: string): Promise<QuoteResult | null> {
   try {
-    // Use Yahoo Finance v8 API
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+    // List of tickers to try - include original and with exchange suffixes
+    const tickersToTry = [ticker];
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-    });
-
-    if (!response.ok) {
-      console.error(`Yahoo Finance API error for ${ticker}: ${response.status}`);
-      return null;
+    // If ticker doesn't already have an exchange suffix, add common ones to try
+    if (!ticker.includes('.')) {
+      // Add London Stock Exchange suffix for UK stocks
+      tickersToTry.push(`${ticker}.L`);
     }
 
-    const data = await response.json() as YahooChartResponse;
-    const result = data.chart?.result?.[0];
+    let lastError: any = null;
 
-    if (!result) {
-      console.error(`No data found for ${ticker}`);
-      return null;
+    for (const tryTicker of tickersToTry) {
+      try {
+        // Use Yahoo Finance v8 API
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(tryTicker)}?interval=1d&range=1d`;
+
+        const response = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+        });
+
+        if (!response.ok) {
+          console.log(`Yahoo Finance API failed for ${tryTicker}: ${response.status}`);
+          lastError = new Error(`HTTP ${response.status}`);
+          continue;
+        }
+
+        const data = await response.json() as YahooChartResponse;
+        const result = data.chart?.result?.[0];
+
+        if (!result || !result.meta) {
+          console.log(`No data found for ${tryTicker}, trying next variant...`);
+          continue;
+        }
+
+        const meta = result.meta;
+
+        // Check if we got a valid price
+        const currentPrice = meta.regularMarketPrice || meta.previousClose || 0;
+        if (currentPrice <= 0) {
+          console.log(`Invalid price for ${tryTicker}, trying next variant...`);
+          continue;
+        }
+
+        const previousClose = meta.chartPreviousClose || meta.previousClose || currentPrice;
+        const change = currentPrice - previousClose;
+        const changePercent = previousClose ? (change / previousClose) * 100 : 0;
+        const quote = result.indicators?.quote?.[0];
+
+        console.log(`Successfully fetched quote for ${tryTicker}: ${currentPrice}`);
+
+        return {
+          ticker: ticker, // Return original ticker, not the variant
+          price: currentPrice,
+          change: change,
+          changePercent: changePercent,
+          dayHigh: quote?.high?.[0] || meta.regularMarketDayHigh || null,
+          dayLow: quote?.low?.[0] || meta.regularMarketDayLow || null,
+          volume: meta.regularMarketVolume || null,
+          weekHigh52: meta.fiftyTwoWeekHigh || null,
+          weekLow52: meta.fiftyTwoWeekLow || null,
+          marketCap: null,
+          peRatio: null,
+          dividendYield: null,
+          name: meta.shortName || meta.longName || ticker,
+          sector: null,
+          industry: null,
+          exchange: meta.exchangeName || meta.exchange || null,
+        };
+      } catch (err) {
+        lastError = err;
+        console.log(`Error fetching ${tryTicker}:`, err);
+        continue;
+      }
     }
 
-    const meta = result.meta;
-    const quote = result.indicators?.quote?.[0];
-
-    const currentPrice = meta.regularMarketPrice || meta.previousClose || 0;
-    const previousClose = meta.chartPreviousClose || meta.previousClose || currentPrice;
-    const change = currentPrice - previousClose;
-    const changePercent = previousClose ? (change / previousClose) * 100 : 0;
-
-    return {
-      ticker: meta.symbol,
-      price: currentPrice,
-      change: change,
-      changePercent: changePercent,
-      dayHigh: quote?.high?.[0] || meta.regularMarketDayHigh || null,
-      dayLow: quote?.low?.[0] || meta.regularMarketDayLow || null,
-      volume: meta.regularMarketVolume || null,
-      weekHigh52: meta.fiftyTwoWeekHigh || null,
-      weekLow52: meta.fiftyTwoWeekLow || null,
-      marketCap: null, // Not available in chart API
-      peRatio: null,
-      dividendYield: null,
-      name: meta.shortName || meta.longName || ticker,
-      sector: null,
-      industry: null,
-      exchange: meta.exchangeName || meta.exchange || null,
-    };
+    console.error(`All ticker variants failed for ${ticker}`);
+    return null;
   } catch (error) {
     console.error(`Error fetching quote for ${ticker}:`, error);
     return null;
