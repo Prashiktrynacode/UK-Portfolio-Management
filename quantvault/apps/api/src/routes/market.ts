@@ -125,18 +125,29 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const response = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`);
+      console.log(`Searching MF API for: ${q}`);
+      const url = `https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`;
+      console.log(`URL: ${url}`);
+
+      const response = await fetch(url);
+      console.log(`MF search response status: ${response.status}`);
 
       if (!response.ok) {
-        throw new Error('Failed to search mutual funds');
+        const errorText = await response.text();
+        console.error('MF search failed:', errorText);
+        throw new Error(`Failed to search mutual funds: ${response.status}`);
       }
 
-      const data = await response.json() as any[];
+      const data = await response.json();
+      console.log(`MF search returned ${Array.isArray(data) ? data.length : 'non-array'} results`);
+
+      // Handle both array and object responses
+      const results = Array.isArray(data) ? data : (data.data || []);
 
       // Return formatted results
       return {
-        results: data.slice(0, 50).map((fund: any) => ({
-          schemeCode: fund.schemeCode,
+        results: results.slice(0, 50).map((fund: any) => ({
+          schemeCode: String(fund.schemeCode),
           schemeName: fund.schemeName,
         })),
       };
@@ -157,16 +168,24 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
     const { schemeCode } = request.params;
 
     try {
-      const response = await fetch(`https://api.mfapi.in/mf/${schemeCode}/latest`);
+      console.log(`Fetching latest NAV for scheme: ${schemeCode}`);
+
+      // Use the main endpoint which returns latest NAV in data[0]
+      const response = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
+      console.log(`MF NAV response status: ${response.status}`);
 
       if (!response.ok) {
-        throw new Error('Failed to fetch NAV');
+        const errorText = await response.text();
+        console.error('MF NAV fetch failed:', errorText);
+        throw new Error(`Failed to fetch NAV: ${response.status}`);
       }
 
       const data = await response.json() as any;
+      console.log(`MF data meta:`, data.meta);
+      console.log(`MF data first entry:`, data.data?.[0]);
 
       return {
-        schemeCode: data.meta?.scheme_code || schemeCode,
+        schemeCode: String(data.meta?.scheme_code || schemeCode),
         schemeName: data.meta?.scheme_name || 'Unknown',
         fundHouse: data.meta?.fund_house || 'Unknown',
         schemeType: data.meta?.scheme_type || 'Unknown',
@@ -191,16 +210,19 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
     const { schemeCode } = request.params;
 
     try {
+      console.log(`Fetching NAV history for scheme: ${schemeCode}`);
       const response = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
 
       if (!response.ok) {
-        throw new Error('Failed to fetch NAV history');
+        const errorText = await response.text();
+        console.error('MF history fetch failed:', errorText);
+        throw new Error(`Failed to fetch NAV history: ${response.status}`);
       }
 
       const data = await response.json() as any;
 
       return {
-        schemeCode: data.meta?.scheme_code || schemeCode,
+        schemeCode: String(data.meta?.scheme_code || schemeCode),
         schemeName: data.meta?.scheme_name || 'Unknown',
         fundHouse: data.meta?.fund_house || 'Unknown',
         schemeType: data.meta?.scheme_type || 'Unknown',

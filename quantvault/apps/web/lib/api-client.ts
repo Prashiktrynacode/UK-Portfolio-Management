@@ -380,6 +380,9 @@ export interface Position {
   unrealizedPL?: number;
   unrealizedPLPercent?: number;
   sector?: string;
+  currency?: string;
+  expenseRatio?: number;
+  schemeCode?: string;
 }
 
 export interface PositionWithMeta extends Position {

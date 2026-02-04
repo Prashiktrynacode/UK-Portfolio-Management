@@ -7,6 +7,20 @@ import { usePortfolio } from '../layout';
 import { api, Position, PositionWithMeta, MutualFundSearchResult, MutualFundNAV } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
+// Helper function to get currency symbol
+function getCurrencySymbol(currency: string): string {
+  const symbols: Record<string, string> = {
+    USD: '$',
+    INR: '₹',
+    GBP: '£',
+    EUR: '€',
+    CAD: 'C$',
+    AUD: 'A$',
+    JPY: '¥',
+  };
+  return symbols[currency] || '$';
+}
+
 export default function PortfolioPage() {
   const { selectedPortfolio, isLoading: portfolioLoading, openCreateModal } = usePortfolio();
   const [positions, setPositions] = useState<PositionWithMeta[]>([]);
@@ -139,6 +153,7 @@ export default function PortfolioPage() {
                 const pl = position.unrealizedPL || 0;
                 const plPercent = position.unrealizedPLPercent || 0;
                 const isPositive = pl >= 0;
+                const currencySymbol = getCurrencySymbol(position.currency || 'USD');
 
                 return (
                   <tr key={position.id} className="hover:bg-secondary/20 transition-colors">
@@ -148,13 +163,13 @@ export default function PortfolioPage() {
                         <div className="text-sm text-muted-foreground">{position.name || position.assetType}</div>
                       </div>
                     </td>
-                    <td className="text-right px-4 py-4 font-mono">{Number(position.quantity).toFixed(2)}</td>
-                    <td className="text-right px-4 py-4 font-mono">${Number(position.avgCostBasis).toFixed(2)}</td>
+                    <td className="text-right px-4 py-4 font-mono">{Number(position.quantity).toFixed(4)}</td>
+                    <td className="text-right px-4 py-4 font-mono">{currencySymbol}{Number(position.avgCostBasis).toFixed(4)}</td>
                     <td className="text-right px-4 py-4 font-mono">
-                      ${position.currentPrice ? Number(position.currentPrice).toFixed(2) : '-'}
+                      {position.currentPrice ? `${currencySymbol}${Number(position.currentPrice).toFixed(4)}` : '-'}
                     </td>
                     <td className="text-right px-4 py-4 font-mono">
-                      ${position.marketValue ? Number(position.marketValue).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '-'}
+                      {position.marketValue ? `${currencySymbol}${Number(position.marketValue).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '-'}
                     </td>
                     <td className={cn(
                       "text-right px-4 py-4 font-mono",
@@ -162,7 +177,7 @@ export default function PortfolioPage() {
                     )}>
                       <div className="flex items-center justify-end gap-1">
                         {isPositive ? <TrendingUp className="size-4" /> : <TrendingDown className="size-4" />}
-                        <span>${Math.abs(pl).toFixed(2)}</span>
+                        <span>{currencySymbol}{Math.abs(pl).toFixed(2)}</span>
                         <span className="text-xs">({isPositive ? '+' : ''}{Number(plPercent).toFixed(2)}%)</span>
                       </div>
                     </td>

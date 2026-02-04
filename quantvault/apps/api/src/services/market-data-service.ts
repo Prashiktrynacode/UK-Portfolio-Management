@@ -131,7 +131,9 @@ async function fetchYahooQuote(ticker: string): Promise<QuoteResult | null> {
  */
 async function fetchMutualFundNAV(schemeCode: string): Promise<QuoteResult | null> {
   try {
-    const response = await fetch(`https://api.mfapi.in/mf/${schemeCode}/latest`);
+    console.log(`Fetching MF NAV for scheme: ${schemeCode}`);
+    // Use the main endpoint which returns latest NAV in data[0]
+    const response = await fetch(`https://api.mfapi.in/mf/${schemeCode}`);
 
     if (!response.ok) {
       console.error(`MFAPI error for ${schemeCode}: ${response.status}`);
@@ -139,6 +141,11 @@ async function fetchMutualFundNAV(schemeCode: string): Promise<QuoteResult | nul
     }
 
     const data = await response.json() as any;
+    console.log(`MFAPI response for ${schemeCode}:`, {
+      meta: data.meta,
+      dataLength: data.data?.length,
+      firstEntry: data.data?.[0]
+    });
 
     if (!data.data || data.data.length === 0) {
       console.error(`No NAV data found for ${schemeCode}`);
@@ -148,11 +155,24 @@ async function fetchMutualFundNAV(schemeCode: string): Promise<QuoteResult | nul
     const nav = parseFloat(data.data[0].nav || '0');
     const schemeName = data.meta?.scheme_name || `MF${schemeCode}`;
 
+    // Calculate daily change if we have 2 days of data
+    let change = 0;
+    let changePercent = 0;
+    if (data.data.length >= 2) {
+      const previousNav = parseFloat(data.data[1].nav || '0');
+      if (previousNav > 0) {
+        change = nav - previousNav;
+        changePercent = (change / previousNav) * 100;
+      }
+    }
+
+    console.log(`Parsed MF NAV: ${nav}, change: ${change}, changePercent: ${changePercent}`);
+
     return {
       ticker: `MF${schemeCode}`,
       price: nav,
-      change: 0, // MFAPI doesn't provide daily change
-      changePercent: 0,
+      change: change,
+      changePercent: changePercent,
       dayHigh: null,
       dayLow: null,
       volume: null,
