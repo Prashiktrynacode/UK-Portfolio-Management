@@ -67,24 +67,77 @@ interface QuoteResult {
 const CACHE_DURATION = 5 * 60 * 1000;
 const quoteCache = new Map<string, { data: QuoteResult; timestamp: number }>();
 
+// Known UK stocks that need .L suffix on Yahoo Finance
+const UK_STOCKS = new Set([
+  'IAG', 'RR', 'BP', 'HSBA', 'SHEL', 'AZN', 'GSK', 'ULVR', 'DGE', 'RIO',
+  'LSEG', 'REL', 'NG', 'VOD', 'BARC', 'LLOY', 'NWG', 'STAN', 'PRU', 'AVST',
+  'AAL', 'ABF', 'ADM', 'AHT', 'ANTO', 'AUTO', 'AV', 'BA', 'BAE', 'BATS',
+  'BKG', 'BLND', 'BNZL', 'BT', 'CCH', 'CNA', 'CPG', 'CRDA', 'CRH', 'DCC',
+  'ENT', 'EXPN', 'FERG', 'FLTR', 'FRES', 'GLEN', 'HIK', 'HL', 'HLMA', 'HSBA',
+  'IHG', 'III', 'IMB', 'INF', 'ITRK', 'JD', 'KGF', 'LAND', 'LGEN', 'MKS',
+  'MNDI', 'MNG', 'MRO', 'NXT', 'OCDO', 'PHNX', 'PSON', 'RKT', 'RMV', 'RS',
+  'RSA', 'RSW', 'SBRY', 'SDR', 'SGRO', 'SKG', 'SMDS', 'SMIN', 'SMT', 'SN',
+  'SPX', 'SSE', 'STAN', 'SVT', 'TSCO', 'TW', 'UU', 'WPP', 'WTB'
+]);
+
+// Known ETF ticker mappings (Trading 212 code -> Yahoo Finance ticker)
+const ETF_MAPPINGS: Record<string, string> = {
+  'CSX5': 'CSX5.L',    // iShares Core S&P 500
+  'EQGB': 'EQGB.L',    // Invesco EQQQ NASDAQ-100 GBP
+  'R2SC': 'R2SC.L',    // iShares Russell 2000
+  'MCTS': 'MCTS.L',    // iShares MSCI China
+  'IIND': 'IIND.L',    // iShares India
+  'VUSA': 'VUSA.L',    // Vanguard S&P 500
+  'VWRL': 'VWRL.L',    // Vanguard FTSE All-World
+  'VHYL': 'VHYL.L',    // Vanguard High Dividend Yield
+  'VMID': 'VMID.L',    // Vanguard FTSE 250
+  'VUKE': 'VUKE.L',    // Vanguard FTSE 100
+  'ISF': 'ISF.L',      // iShares Core FTSE 100
+  'SWDA': 'SWDA.L',    // iShares Core MSCI World
+  'CSPX': 'CSPX.L',    // iShares Core S&P 500
+  'SNDK': 'WDC',       // SanDisk was acquired by Western Digital
+};
+
 /**
  * Fetch quote from Yahoo Finance API
  * Automatically handles UK stocks (LSE) by appending .L suffix if needed
  */
 async function fetchYahooQuote(ticker: string): Promise<QuoteResult | null> {
   try {
-    // List of tickers to try - include original and with exchange suffixes
-    const tickersToTry = [ticker];
+    // Check for known ETF mappings first
+    const mappedTicker = ETF_MAPPINGS[ticker.toUpperCase()];
 
-    // If ticker doesn't already have an exchange suffix, add common ones to try
-    if (!ticker.includes('.')) {
-      // Add London Stock Exchange suffix for UK stocks
-      tickersToTry.push(`${ticker}.L`);
+    // Build list of tickers to try
+    const tickersToTry: string[] = [];
+
+    if (mappedTicker) {
+      // Use mapped ticker first
+      tickersToTry.push(mappedTicker);
+      console.log(`Using mapped ticker for ${ticker}: ${mappedTicker}`);
     }
+
+    // Add original ticker
+    tickersToTry.push(ticker);
+
+    // If ticker doesn't have an exchange suffix, try with .L for LSE
+    if (!ticker.includes('.')) {
+      // Check if it's a known UK stock
+      if (UK_STOCKS.has(ticker.toUpperCase())) {
+        // Try .L first for known UK stocks
+        tickersToTry.unshift(`${ticker}.L`);
+      } else {
+        // Try .L as fallback for other tickers
+        tickersToTry.push(`${ticker}.L`);
+      }
+    }
+
+    // Remove duplicates while preserving order
+    const uniqueTickers = [...new Set(tickersToTry)];
+    console.log(`Trying tickers for ${ticker}: ${uniqueTickers.join(', ')}`);
 
     let lastError: any = null;
 
-    for (const tryTicker of tickersToTry) {
+    for (const tryTicker of uniqueTickers) {
       try {
         // Use Yahoo Finance v8 API
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(tryTicker)}?interval=1d&range=1d`;
@@ -123,7 +176,7 @@ async function fetchYahooQuote(ticker: string): Promise<QuoteResult | null> {
         const changePercent = previousClose ? (change / previousClose) * 100 : 0;
         const quote = result.indicators?.quote?.[0];
 
-        console.log(`Successfully fetched quote for ${tryTicker}: ${currentPrice}`);
+        console.log(`Successfully fetched quote for ${ticker} using ${tryTicker}: price=${currentPrice}`);
 
         return {
           ticker: ticker, // Return original ticker, not the variant
@@ -150,7 +203,7 @@ async function fetchYahooQuote(ticker: string): Promise<QuoteResult | null> {
       }
     }
 
-    console.error(`All ticker variants failed for ${ticker}`);
+    console.error(`All ticker variants failed for ${ticker}: tried ${uniqueTickers.join(', ')}`);
     return null;
   } catch (error) {
     console.error(`Error fetching quote for ${ticker}:`, error);
