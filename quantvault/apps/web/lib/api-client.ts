@@ -284,7 +284,10 @@ export const api = {
       apiFetch<{ results: TickerSearchResult[] }>('/market/search', { params: { q: query } }),
 
     refreshPortfolio: (portfolioId: string) =>
-      apiFetch<{ success: boolean }>(`/market/refresh/${portfolioId}`, { method: 'POST' }),
+      apiFetch<{ success: boolean }>(`/market/refresh/${portfolioId}`, {
+        method: 'POST',
+        body: JSON.stringify({}),  // Send empty body to avoid Fastify body parsing issues
+      }),
 
     // Indian Mutual Fund endpoints
     searchMutualFunds: (query: string) =>

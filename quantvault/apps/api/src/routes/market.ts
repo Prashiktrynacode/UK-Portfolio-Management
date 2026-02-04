@@ -90,7 +90,11 @@ export const marketRoutes: FastifyPluginAsync = async (fastify) => {
   // Refresh market data for a portfolio
   fastify.post<{
     Params: { portfolioId: string };
-  }>('/refresh/:portfolioId', async (request, reply) => {
+  }>('/refresh/:portfolioId', {
+    schema: {
+      body: { type: 'object', additionalProperties: true },  // Allow empty or any body
+    },
+  }, async (request, reply) => {
     const { portfolioId } = request.params;
 
     console.log(`Received refresh request for portfolio: ${portfolioId}`);
